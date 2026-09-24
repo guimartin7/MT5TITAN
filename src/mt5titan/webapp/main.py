@@ -19,7 +19,7 @@ from mt5titan.risk import RiskEngine, RiskLimits, RiskState
 from mt5titan.storage import SQLiteStore
 
 
-app = FastAPI(title="MT5TITAN", version="0.3.0")
+app = FastAPI(title="MT5TITAN", version="0.4.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -40,6 +40,7 @@ class Candle(BaseModel):
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=32)
     timeframe: str = "M5"
+    source: str = "external"
     candles: list[Candle] = Field(min_length=30)
 
 
@@ -110,6 +111,7 @@ def _analyze(payload: AnalyzeRequest) -> dict:
     return {
         "symbol": payload.symbol,
         "timeframe": payload.timeframe,
+        "source": payload.source,
         "features": features.to_dict(),
         "regime": {
             "value": regime.regime.value,
@@ -153,7 +155,7 @@ def _analyze(payload: AnalyzeRequest) -> dict:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.3.0", "persistence": "sqlite"}
+    return {"status": "ok", "version": "0.4.0", "persistence": "sqlite"}
 
 
 @app.get("/api/brokers")
