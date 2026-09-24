@@ -21,6 +21,7 @@ class AgentContext:
     features: dict[str, Any] = field(default_factory=dict)
     strategy_signals: dict[str, float] = field(default_factory=dict)
     event_risk: dict[str, Any] = field(default_factory=dict)
+    macro_context: dict[str, Any] = field(default_factory=dict)
     portfolio: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict:
@@ -33,6 +34,7 @@ class AgentContext:
             "features": self.features,
             "strategy_signals": self.strategy_signals,
             "event_risk": self.event_risk,
+            "macro_context": self.macro_context,
             "portfolio": self.portfolio,
         }
 

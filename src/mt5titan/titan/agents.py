@@ -68,8 +68,9 @@ class MacroAgent(BaseAgent):
             provider,
             "macro",
             (
-                "Evaluate only supplied macro/event and portfolio context. Do not "
-                "invent economic data. Prefer HOLD when evidence is incomplete and "
-                "VETO for explicit portfolio or event-risk conflicts."
+                "Evaluate only supplied macro_context, event-risk and portfolio context. "
+                "Do not invent economic data or assume causality from a single series. "
+                "Prefer HOLD when evidence is incomplete and VETO for explicit portfolio "
+                "or event-risk conflicts."
             ),
         )

@@ -18,6 +18,7 @@ def build_agent_context(
     market_score: MarketScore,
     strategy_signals: dict[str, float],
     event_risk: dict | None = None,
+    macro_context: dict | None = None,
     portfolio: dict | None = None,
 ) -> AgentContext:
     if timestamp <= 0:
@@ -31,5 +32,6 @@ def build_agent_context(
         features=asdict(features),
         strategy_signals={str(k): float(v) for k, v in strategy_signals.items()},
         event_risk=dict(event_risk or {}),
+        macro_context=dict(macro_context or {}),
         portfolio=dict(portfolio or {}),
     )
