@@ -330,3 +330,40 @@ def test_dashboard_handles_non_json_errors():
     html = client.get("/").text
     assert "const raw = await response.text()" in html
     assert "Resposta inválida da API" in html
+
+
+def test_ai_quota_failure_falls_back_to_quant(monkeypatch):
+    from mt5titan.webapp import main as webmain
+
+    class QuotaProvider:
+        def structured_decision(self, **kwargs):
+            raise RuntimeError(
+                "OpenAI request failed (RateLimitError): insufficient_quota "
+                "credit_balance_exhausted"
+            )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "configured")
+    monkeypatch.setenv("OPENAI_MODEL", "test-model")
+    monkeypatch.setattr(webmain, "OpenAIProvider", lambda: QuotaProvider())
+
+    market = client.get(
+        "/api/market/candles?symbol=QUOTATEST&timeframe=M5&source=demo&count=80"
+    ).json()
+    response = client.post(
+        "/api/analyze",
+        json={
+            "symbol": "QUOTATEST",
+            "timeframe": "M5",
+            "source": "demo",
+            "use_ai": True,
+            "candles": market["candles"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["decision"]["action"] in {"BUY", "SELL", "HOLD"}
+    assert body["ai"]["requested"] is True
+    assert body["ai"]["available"] is False
+    assert body["ai"]["fallback"] == "quant_only"
+    assert body["ai"]["reason"] == "OPENAI_CREDITS_EXHAUSTED"
