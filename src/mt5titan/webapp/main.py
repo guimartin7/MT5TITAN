@@ -22,7 +22,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.7.0")
+app = FastAPI(title="MT5TITAN", version="0.7.1")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -227,12 +227,34 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.7.0",
+        "version": "0.7.1",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
             "configured": ai_configured,
         },
+    }
+
+
+@app.get("/api/diagnostics")
+def diagnostics():
+    ai_key = bool(os.getenv("OPENAI_API_KEY"))
+    ai_model = bool(os.getenv("OPENAI_MODEL"))
+    try:
+        db_ok = store.list_watchlist() is not None
+    except Exception:
+        db_ok = False
+
+    return {
+        "app": {"status": "ok", "version": "0.7.1"},
+        "database": {"status": "ok" if db_ok else "error"},
+        "quant": {"status": "ok"},
+        "ai": {
+            "status": "configured" if ai_key and ai_model else "not_configured",
+            "api_key_present": ai_key,
+            "model_present": ai_model,
+        },
+        "avalon": avalon.status(),
     }
 
 
