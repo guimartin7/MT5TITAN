@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from mt5titan.brokers import AvalonBrokerAdapter, PaperTradingBroker
 from mt5titan.domain import DecisionAction
-from mt5titan.intelligence import DecisionEngine, build_features, detect_regime, score_market
+from mt5titan.intelligence import DecisionEngine, build_features, build_trade_recommendation, detect_regime, score_market
 from mt5titan.intelligence.signals import strategy_signal
 from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider
 from mt5titan.research import StrategySpec
@@ -22,7 +22,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.6.0")
+app = FastAPI(title="MT5TITAN", version="0.7.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -78,6 +78,12 @@ class OutcomeRequest(BaseModel):
     analysis_id: int
     exit_price: float = Field(gt=0)
     entry_price: float | None = Field(default=None, gt=0)
+
+
+class ScannerRequest(BaseModel):
+    deep_ai: bool = False
+    ai_top_n: int = Field(default=3, ge=1, le=5)
+    candle_count: int = Field(default=140, ge=30, le=500)
 
 
 def _specs():
@@ -221,7 +227,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.6.0",
+        "version": "0.7.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -246,6 +252,112 @@ def analyze(payload: AnalyzeRequest):
         raise HTTPException(status_code=422, detail=str(error)) from error
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.post("/api/scanner")
+def scan_opportunities(payload: ScannerRequest):
+    watch_items = store.list_watchlist()
+    if not watch_items:
+        raise HTTPException(status_code=422, detail="watchlist is empty")
+
+    if payload.deep_ai and (
+        not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENAI_MODEL")
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Deep AI scan requires OPENAI_API_KEY and OPENAI_MODEL",
+        )
+
+    candidates = []
+    skipped = []
+
+    for item in watch_items[:25]:
+        try:
+            provider = demo_market if item["source"] == "demo" else stored_market
+            batch = provider.candles(
+                symbol=item["symbol"],
+                timeframe=item["timeframe"],
+                count=payload.candle_count,
+            )
+            request = AnalyzeRequest(
+                symbol=batch.symbol,
+                timeframe=batch.timeframe,
+                source=batch.source,
+                use_ai=False,
+                candles=[Candle(**row) for row in batch.candles],
+            )
+            report = _analyze(request)
+            recommendation = build_trade_recommendation(report)
+            candidates.append({
+                "symbol": batch.symbol,
+                "timeframe": batch.timeframe,
+                "source": batch.source,
+                "deep_ai": False,
+                "recommendation": recommendation.to_dict(),
+                "decision": report["decision"],
+                "regime": report["regime"],
+                "market_score": report["market_score"],
+                "risk": report["risk"],
+                "_candles": batch.candles,
+            })
+        except (ValueError, RuntimeError) as error:
+            skipped.append({
+                "symbol": item["symbol"],
+                "timeframe": item["timeframe"],
+                "source": item["source"],
+                "reason": str(error),
+            })
+
+    candidates.sort(
+        key=lambda row: row["recommendation"]["opportunity_score"],
+        reverse=True,
+    )
+
+    if payload.deep_ai:
+        eligible = [
+            row
+            for row in candidates
+            if row["recommendation"]["action"] != "HOLD" and row["risk"]["allowed"]
+        ][: payload.ai_top_n]
+
+        for candidate in eligible:
+            request = AnalyzeRequest(
+                symbol=candidate["symbol"],
+                timeframe=candidate["timeframe"],
+                source=candidate["source"],
+                use_ai=True,
+                candles=[Candle(**row) for row in candidate["_candles"]],
+            )
+            report = _analyze(request)
+            recommendation = build_trade_recommendation(report)
+            candidate.update({
+                "deep_ai": True,
+                "recommendation": recommendation.to_dict(),
+                "decision": report["decision"],
+                "regime": report["regime"],
+                "market_score": report["market_score"],
+                "risk": report["risk"],
+                "ai": report["ai"],
+            })
+
+        candidates.sort(
+            key=lambda row: row["recommendation"]["opportunity_score"],
+            reverse=True,
+        )
+
+    for candidate in candidates:
+        candidate.pop("_candles", None)
+
+    return {
+        "mode": "QUANT_PLUS_TOP_AI" if payload.deep_ai else "QUANT_SCAN",
+        "watchlist_size": len(watch_items),
+        "ranked": candidates,
+        "skipped": skipped,
+        "note": (
+            "Scanner results are not persisted as decisions. "
+            "Run a full analysis on a selected candidate to create an analysis_id."
+        ),
+    }
 
 
 @app.get("/api/analyses")
