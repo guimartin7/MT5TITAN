@@ -42,6 +42,26 @@ class SQLiteStore:
                     settled_at_utc TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS watchlist (
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    PRIMARY KEY(symbol, timeframe, source)
+                );
+
+                CREATE TABLE IF NOT EXISTS market_candles (
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    time INTEGER NOT NULL,
+                    open REAL NOT NULL,
+                    high REAL NOT NULL,
+                    low REAL NOT NULL,
+                    close REAL NOT NULL,
+                    spread REAL NOT NULL DEFAULT 0,
+                    tick_volume REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY(symbol, timeframe, time)
+                );
+
                 CREATE TABLE IF NOT EXISTS analyses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at_utc TEXT NOT NULL,
@@ -186,3 +206,79 @@ class SQLiteStore:
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+
+    def add_watchlist(self, *, symbol: str, timeframe: str, source: str) -> dict:
+        symbol = symbol.strip().upper()
+        timeframe = timeframe.strip().upper()
+        source = source.strip().lower()
+        if not symbol:
+            raise ValueError("symbol is required")
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO watchlist(symbol, timeframe, source) VALUES (?, ?, ?)",
+                (symbol, timeframe, source),
+            )
+        return {"symbol": symbol, "timeframe": timeframe, "source": source}
+
+    def remove_watchlist(self, *, symbol: str, timeframe: str, source: str) -> None:
+        with self.connect() as db:
+            db.execute(
+                "DELETE FROM watchlist WHERE symbol=? AND timeframe=? AND source=?",
+                (symbol.upper(), timeframe.upper(), source.lower()),
+            )
+
+    def list_watchlist(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT symbol, timeframe, source FROM watchlist ORDER BY symbol, timeframe"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def replace_market_candles(self, *, symbol: str, timeframe: str, candles: list[dict]) -> int:
+        symbol = symbol.strip().upper()
+        timeframe = timeframe.strip().upper()
+        if len(candles) < 30:
+            raise ValueError("at least 30 candles are required")
+        with self.connect() as db:
+            db.execute(
+                "DELETE FROM market_candles WHERE symbol=? AND timeframe=?",
+                (symbol, timeframe),
+            )
+            db.executemany(
+                """
+                INSERT INTO market_candles(
+                    symbol, timeframe, time, open, high, low, close, spread, tick_volume
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        symbol,
+                        timeframe,
+                        int(candle["time"]),
+                        float(candle["open"]),
+                        float(candle["high"]),
+                        float(candle["low"]),
+                        float(candle["close"]),
+                        float(candle.get("spread", 0.0)),
+                        float(candle.get("tick_volume", 0.0)),
+                    )
+                    for candle in candles
+                ],
+            )
+        return len(candles)
+
+    def load_market_candles(self, *, symbol: str, timeframe: str, limit: int = 140) -> list[dict]:
+        limit = max(30, min(int(limit), 5000))
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT time, open, high, low, close, spread, tick_volume
+                FROM market_candles
+                WHERE symbol=? AND timeframe=?
+                ORDER BY time DESC
+                LIMIT ?
+                """,
+                (symbol.upper(), timeframe.upper(), limit),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
