@@ -1,40 +1,34 @@
-"""In-memory paper broker for the web application."""
-from dataclasses import asdict, dataclass, field
+"""Persistent paper broker for the web application."""
 from datetime import datetime, timezone
 
-
-@dataclass
-class PaperTrade:
-    trade_id: int
-    symbol: str
-    side: str
-    stake: float
-    entry_price: float
-    created_at_utc: str
-
-
-@dataclass
-class PaperState:
-    balance: float = 10_000.0
-    open_trades: list[PaperTrade] = field(default_factory=list)
-    history: list[dict] = field(default_factory=list)
+from mt5titan.storage import SQLiteStore
 
 
 class PaperTradingBroker:
     name = "paper"
     execution_enabled = True
 
-    def __init__(self, initial_balance: float = 10_000.0):
-        self.state = PaperState(balance=float(initial_balance))
-        self._next_id = 1
+    def __init__(self, initial_balance: float = 10_000.0, store: SQLiteStore | None = None):
+        self.store = store or SQLiteStore()
+        self.initial_balance = float(initial_balance)
+        current = self.store.get_state_float("paper_balance", self.initial_balance)
+        self.store.set_state("paper_balance", current)
+
+    @property
+    def balance(self) -> float:
+        return self.store.get_state_float("paper_balance", self.initial_balance)
+
+    def _set_balance(self, value: float) -> None:
+        self.store.set_state("paper_balance", round(value, 10))
 
     def status(self) -> dict:
+        snapshot = self.store.paper_snapshot()
         return {
             "broker": self.name,
             "connected": True,
             "execution_enabled": True,
-            "balance": round(self.state.balance, 2),
-            "open_trades": len(self.state.open_trades),
+            "balance": round(self.balance, 2),
+            "open_trades": len(snapshot["open_trades"]),
         }
 
     def place_order(self, *, symbol: str, side: str, stake: float, price: float) -> dict:
@@ -45,49 +39,52 @@ class PaperTradingBroker:
             raise ValueError("stake must be positive")
         if price <= 0:
             raise ValueError("price must be positive")
-        if stake > self.state.balance:
+        if stake > self.balance:
             raise ValueError("insufficient paper balance")
 
-        trade = PaperTrade(
-            trade_id=self._next_id,
+        now = datetime.now(timezone.utc).isoformat()
+        trade = self.store.create_paper_trade(
             symbol=symbol,
             side=side,
             stake=float(stake),
             entry_price=float(price),
-            created_at_utc=datetime.now(timezone.utc).isoformat(),
+            created_at_utc=now,
         )
-        self._next_id += 1
-        self.state.balance -= stake
-        self.state.open_trades.append(trade)
-        return asdict(trade)
+        self._set_balance(self.balance - float(stake))
+        return trade
 
     def settle(self, *, trade_id: int, exit_price: float, payout_ratio: float = 0.82) -> dict:
         if exit_price <= 0:
             raise ValueError("exit_price must be positive")
-        trade = next((t for t in self.state.open_trades if t.trade_id == trade_id), None)
-        if trade is None:
-            raise ValueError("trade not found")
 
-        won = exit_price > trade.entry_price if trade.side == "BUY" else exit_price < trade.entry_price
-        returned = trade.stake * (1.0 + payout_ratio) if won else 0.0
-        pnl = returned - trade.stake
-        self.state.balance += returned
-        self.state.open_trades.remove(trade)
+        trade = self.store.get_paper_trade(trade_id)
+        if trade["status"] != "OPEN":
+            raise ValueError("trade already settled")
 
-        result = {
-            **asdict(trade),
-            "exit_price": float(exit_price),
-            "won": won,
-            "payout_ratio": payout_ratio,
-            "pnl": round(pnl, 2),
-            "settled_at_utc": datetime.now(timezone.utc).isoformat(),
-        }
-        self.state.history.append(result)
-        return result
+        won = exit_price > trade["entry_price"] if trade["side"] == "BUY" else exit_price < trade["entry_price"]
+        returned = trade["stake"] * (1.0 + payout_ratio) if won else 0.0
+        pnl = returned - trade["stake"]
+        self._set_balance(self.balance + returned)
+
+        return self.store.settle_paper_trade(
+            trade_id=trade_id,
+            exit_price=float(exit_price),
+            payout_ratio=float(payout_ratio),
+            won=won,
+            pnl=round(pnl, 2),
+            settled_at_utc=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def reset(self, balance: float | None = None) -> dict:
+        value = self.initial_balance if balance is None else float(balance)
+        if value <= 0:
+            raise ValueError("balance must be positive")
+        self._set_balance(value)
+        return self.snapshot()
 
     def snapshot(self) -> dict:
+        snapshot = self.store.paper_snapshot()
         return {
-            "balance": round(self.state.balance, 2),
-            "open_trades": [asdict(t) for t in self.state.open_trades],
-            "history": list(self.state.history),
+            "balance": round(self.balance, 2),
+            **snapshot,
         }

@@ -15,9 +15,9 @@ A aplicação funciona hoje com:
 - Decision Engine;
 - Risk Engine;
 - agentes de IA e AI Committee;
-- paper trading funcional;
+- paper trading funcional e persistente em SQLite;
 - research/backtest/walk-forward;
-- replay e auditoria;
+- replay, histórico de decisões e auditoria;
 - adapter de broker desacoplado.
 
 ## Avalon Broker
@@ -71,3 +71,15 @@ Broker Adapter
 - Paper trading é o único modo de execução habilitado por padrão.
 - Credenciais ficam fora do repositório.
 - Integrações de corretora ficam isoladas em `mt5titan.brokers`.
+
+
+## Persistência local
+
+Por padrão, a aplicação cria:
+
+```text
+data/mt5titan.db
+```
+
+O SQLite guarda o saldo paper, operações abertas/fechadas e o histórico das análises.
+O diretório `data/` fica fora do Git.

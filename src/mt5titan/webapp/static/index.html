@@ -55,7 +55,7 @@
         <button onclick="paperOrder('BUY')">BUY</button>
         <button onclick="paperOrder('SELL')">SELL</button>
       </div>
-      <div id="paperMsg" class="muted" style="margin-top:12px"></div>
+      <div id="paperMsg" class="muted" style="margin-top:12px"></div><div style="margin-top:12px"><button onclick="resetPaper()">Reset paper</button></div>
     </aside>
 
     <section class="card full">
@@ -66,7 +66,7 @@
 </div>
 
 <script>
-let lastPrice = null;
+let lastPrice = null;\nlet lastAnalysisId = null;\nlet lastDecision = null;
 
 async function json(url, options={}) {
   const response = await fetch(url, options);
@@ -81,6 +81,35 @@ async function refresh() {
   document.getElementById('balance').textContent = '$ ' + paper.balance.toFixed(2);
   document.getElementById('brokerBadge').textContent =
     'Paper: ON · Avalon: ' + (brokers.avalon.connected ? 'ON' : 'aguardando API oficial');
+  document.getElementById('paperTrades').innerHTML = renderPaper(paper);
+  const history = await json('/api/analyses?limit=12');
+  document.getElementById('analysisHistory').innerHTML = renderHistory(history.items);
+}
+
+function renderPaper(paper) {
+  const open = paper.open_trades || [];
+  const history = paper.history || [];
+  const openRows = open.map(t => '<tr><td>#'+t.trade_id+'</td><td>'+t.symbol+'</td><td>'+t.side+'</td><td>'+t.entry_price+'</td><td><button onclick="settleTrade('+t.trade_id+')">Liquidar</button></td></tr>').join('');
+  const historyRows = history.slice(0,8).map(t => '<tr><td>#'+t.trade_id+'</td><td>'+t.side+'</td><td>'+t.pnl+'</td><td>'+(t.won ? 'WIN' : 'LOSS')+'</td><td>'+t.status+'</td></tr>').join('');
+  return '<h3>Abertas</h3><table><tr><th>ID</th><th>Ativo</th><th>Lado</th><th>Entrada</th><th></th></tr>'+(openRows || '<tr><td colspan="5">Nenhuma operação aberta.</td></tr>')+'</table><h3>Fechadas</h3><table><tr><th>ID</th><th>Lado</th><th>P&L</th><th>Resultado</th><th>Status</th></tr>'+(historyRows || '<tr><td colspan="5">Sem histórico.</td></tr>')+'</table>';
+}
+
+function renderHistory(items) {
+  const rows = items.map(a => '<tr><td>#'+a.id+'</td><td>'+a.symbol+'</td><td>'+a.timeframe+'</td><td>'+a.regime+'</td><td>'+a.action+'</td><td>'+Math.round(a.confidence*100)+'%</td><td>'+a.market_score+'</td></tr>').join('');
+  return '<table><tr><th>ID</th><th>Ativo</th><th>TF</th><th>Regime</th><th>Decisão</th><th>Conf.</th><th>Score</th></tr>'+(rows || '<tr><td colspan="7">Nenhuma análise salva.</td></tr>')+'</table>';
+}
+
+async function settleTrade(id) {
+  const price = Number(prompt('Preço de saída', lastPrice || 100));
+  if (!price) return;
+  await json('/api/paper/settle', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,payout_ratio:0.82})});
+  await refresh();
+}
+
+async function resetPaper() {
+  await json('/api/paper/reset', {method:'POST'});
+  document.getElementById('paperMsg').textContent='Paper resetado.';
+  await refresh();
 }
 
 async function runDemo() {
@@ -98,20 +127,19 @@ async function runDemo() {
   });
   document.getElementById('regime').textContent = result.regime.value;
   document.getElementById('score').textContent = result.market_score.total;
-  document.getElementById('decision').textContent = result.decision.action;
+  document.getElementById('decision').textContent = result.decision.action;\n  lastAnalysisId = result.analysis_id;\n  lastDecision = result.decision.action;
   document.getElementById('signals').innerHTML = '<table><tr><th>Fonte</th><th>Ação</th><th>Confiança</th></tr>' +
     result.signals.map(s => '<tr><td>'+s.source+'</td><td>'+s.action+'</td><td>'+Math.round(s.confidence*100)+'%</td></tr>').join('') + '</table>';
-  document.getElementById('report').textContent = JSON.stringify(result, null, 2);
+  document.getElementById('report').textContent = JSON.stringify(result, null, 2);\n  await refresh();
 }
 
 async function paperOrder(side) {
-  if (!lastPrice) return document.getElementById('paperMsg').textContent='Rode uma análise primeiro.';
+  if (!lastPrice || !lastAnalysisId) return document.getElementById('paperMsg').textContent='Rode uma análise primeiro.';\n  if (lastDecision === 'HOLD') return document.getElementById('paperMsg').textContent='A última decisão foi HOLD.';\n  if (side !== lastDecision) return document.getElementById('paperMsg').textContent='O lado precisa coincidir com a decisão '+lastDecision+'.';
   try {
     const trade = await json('/api/paper/order', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        symbol:document.getElementById('symbol').value || 'DEMO',
+      body:JSON.stringify({\n        analysis_id:lastAnalysisId,\n        symbol:document.getElementById('symbol').value || 'DEMO',
         side,
         stake:Number(document.getElementById('stake').value),
         price:lastPrice
