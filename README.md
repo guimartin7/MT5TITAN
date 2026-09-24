@@ -135,3 +135,39 @@ O sistema registra:
 
 Essas métricas são observacionais. Elas ainda não alteram automaticamente os pesos dos agentes;
 a calibração será uma etapa separada para evitar autoajuste com pouca amostra.
+
+
+## Opportunity Scanner
+
+A versão 0.7.0 adiciona um scanner em duas etapas:
+
+```text
+Watchlist
+   ↓
+Quant Scan
+   ↓
+Ranking preliminar
+   ↓
+Top 3 elegíveis
+   ↓
+Deep AI (opcional)
+   ↓
+Ranking final
+```
+
+O scanner calcula um `opportunity_score` de 0 a 100 usando market score,
+força/confiança da decisão e confiança do regime. Ele também gera:
+
+- direção BUY / SELL / HOLD;
+- nível de risco;
+- zona de entrada indicativa;
+- preço de invalidação;
+- horizonte compatível com o timeframe;
+- identificação se o ranking veio de Quant ou Deep AI.
+
+O scanner **não cria analysis_id** e não entra no histórico. Ao escolher uma
+oportunidade e clicar em **Analisar**, a análise completa é executada e passa a
+ser auditável/elegível para o feedback loop.
+
+O botão **Popular demo** cria uma watchlist sintética para teste. Os preços gerados
+não são cotações reais.

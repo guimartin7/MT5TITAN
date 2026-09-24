@@ -237,3 +237,55 @@ def test_hold_outcome_is_not_counted_as_directional_trade():
     )
     assert response.status_code == 200
     assert response.json()["result"] == "HOLD"
+
+
+def test_demo_watchlist_seed():
+    response = client.post("/api/watchlist/demo-seed")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 5
+    assert all(item["source"] == "demo" for item in items)
+
+
+def test_scanner_ranks_seeded_watchlist(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    client.post("/api/watchlist/demo-seed")
+
+    before = len(store.recent_analyses(200))
+    response = client.post(
+        "/api/scanner",
+        json={"deep_ai": False, "ai_top_n": 3, "candle_count": 140},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "QUANT_SCAN"
+    assert len(body["ranked"]) >= 5
+    scores = [item["recommendation"]["opportunity_score"] for item in body["ranked"]]
+    assert scores == sorted(scores, reverse=True)
+    assert all(item["deep_ai"] is False for item in body["ranked"])
+    after = len(store.recent_analyses(200))
+    assert after == before
+
+
+def test_deep_ai_scanner_requires_configuration(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    client.post("/api/watchlist/demo-seed")
+    response = client.post(
+        "/api/scanner",
+        json={"deep_ai": True, "ai_top_n": 3, "candle_count": 140},
+    )
+    assert response.status_code == 503
+
+
+def test_dashboard_contains_scanner_and_history_containers():
+    html = client.get("/").text
+    for element_id in (
+        'scannerResults',
+        'watchlist',
+        'paperTrades',
+        'analysisHistory',
+        'outcomeStats',
+    ):
+        assert f'id="{element_id}"' in html
