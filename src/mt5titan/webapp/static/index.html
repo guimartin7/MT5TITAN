@@ -30,6 +30,20 @@
   </div>
 
   <div class="grid">
+    <section class="card full">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <h2 style="margin-bottom:6px">Opportunity Scanner</h2>
+          <div class="muted">Varre a watchlist com Quant e, opcionalmente, usa IA apenas nos melhores candidatos.</div>
+        </div>
+        <div class="row">
+          <label class="badge"><input id="scannerAi" type="checkbox"> Deep AI nos Top 3</label>
+          <button class="primary" onclick="runScanner()">Escanear watchlist</button>
+        </div>
+      </div>
+      <div id="scannerResults" style="margin-top:14px"><div class="muted">Adicione ativos à watchlist e execute o scanner.</div></div>
+    </section>
+
     <section class="card wide">
       <h2>Análise</h2>
       <div class="row">
@@ -64,6 +78,21 @@
     </aside>
 
     <section class="card full">
+      <h2>Watchlist</h2>
+      <div id="watchlist"></div>
+    </section>
+
+    <section class="card full">
+      <h2>Operações paper</h2>
+      <div id="paperTrades"></div>
+    </section>
+
+    <section class="card full">
+      <h2>Histórico de decisões</h2>
+      <div id="analysisHistory"></div>
+    </section>
+
+    <section class="card full">
       <h2>Avaliação das decisões</h2>
       <div class="row">
         <input id="outcomePrice" type="number" step="any" placeholder="Preço futuro">
@@ -74,7 +103,7 @@
 
     <section class="card full">
       <h2>Último relatório</h2>
-      <pre id="report">Clique em “Analisar demo”.</pre>
+      <pre id="report">Escolha um ativo ou uma oportunidade e clique em “Analisar”.</pre>
     </section>
   </div>
 </div>
@@ -106,6 +135,56 @@ async function refresh() {
   document.getElementById('watchlist').innerHTML = renderWatchlist(watch.items);
   const stats = await json('/api/outcomes/stats');
   document.getElementById('outcomeStats').innerHTML = renderOutcomeStats(stats);
+}
+
+function renderScanner(items) {
+  if (!items.length) return '<div class="muted">Nenhuma oportunidade válida encontrada.</div>';
+  const rows = items.map((item, index) => {
+    const rec = item.recommendation;
+    const invalidation = rec.invalidation_price == null ? '—' : rec.invalidation_price;
+    return '<tr>'+
+      '<td>'+(index+1)+'</td>'+
+      '<td><strong>'+item.symbol+'</strong><div class="muted">'+item.timeframe+' · '+item.source+'</div></td>'+
+      '<td>'+rec.action+'</td>'+
+      '<td><strong>'+rec.opportunity_score+'</strong></td>'+
+      '<td>'+Math.round(item.decision.confidence*100)+'%</td>'+
+      '<td>'+rec.risk_level+'</td>'+
+      '<td>'+item.regime.value+'</td>'+
+      '<td>'+rec.entry_zone_low+' → '+rec.entry_zone_high+'</td>'+
+      '<td>'+invalidation+'</td>'+
+      '<td>'+rec.horizon+'</td>'+
+      '<td>'+(item.deep_ai ? 'AI' : 'Quant')+'</td>'+
+      '<td><button onclick="openOpportunity(\''+item.symbol+'\',\''+item.timeframe+'\',\''+item.source+'\','+item.deep_ai+')">Analisar</button></td>'+
+    '</tr>';
+  }).join('');
+  return '<table><tr><th>#</th><th>Ativo</th><th>Ação</th><th>Score</th><th>Conf.</th><th>Risco</th><th>Regime</th><th>Zona entrada</th><th>Invalidação</th><th>Horizonte</th><th>Motor</th><th></th></tr>'+rows+'</table>';
+}
+
+async function runScanner() {
+  const deepAi = document.getElementById('scannerAi').checked;
+  document.getElementById('scannerResults').innerHTML = '<div class="muted">Escaneando...</div>';
+  try {
+    const result = await json('/api/scanner', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({deep_ai:deepAi, ai_top_n:3, candle_count:140})
+    });
+    document.getElementById('scannerResults').innerHTML = renderScanner(result.ranked);
+    if (result.skipped.length) {
+      document.getElementById('paperMsg').textContent = result.skipped.length+' item(ns) ignorado(s) por falta/erro de dados.';
+    }
+  } catch (e) {
+    document.getElementById('scannerResults').innerHTML = '<div class="danger">'+e.message+'</div>';
+  }
+}
+
+async function openOpportunity(symbol, timeframe, source, useAi) {
+  document.getElementById('symbol').value = symbol;
+  document.getElementById('timeframe').value = timeframe;
+  document.getElementById('source').value = source;
+  document.getElementById('useAi').checked = !!useAi;
+  await runMarketAnalysis();
+  window.scrollTo({top:document.getElementById('regime').getBoundingClientRect().top + window.scrollY - 100, behavior:'smooth'});
 }
 
 function renderPaper(paper) {
