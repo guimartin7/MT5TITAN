@@ -185,6 +185,7 @@ async function runMarketAnalysis() {
   const payload = {
     symbol: market.symbol,
     timeframe: market.timeframe,
+    source: market.source,
     candles: market.candles
   };
   const result = await json('/api/analyze', {
