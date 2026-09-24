@@ -53,7 +53,7 @@
         <select id="source"><option value="demo">Demo</option><option value="stored">Importado</option><option value="twelve">Twelve Data (real)</option></select>
         <button class="primary" onclick="runMarketAnalysis()">Analisar</button>
         <label class="badge"><input id="useAi" type="checkbox"> IA</label>
-        <label class="badge"><input id="useContext" type="checkbox"> News/Macro</label>
+        <label class="badge"><input id="useContext" type="checkbox" checked> News/Macro</label>
         <button onclick="addWatchlist()">+ Watchlist</button>
         <input id="marketFile" type="file" accept=".json,application/json" onchange="importMarketFile(this.files[0])">
       </div>
