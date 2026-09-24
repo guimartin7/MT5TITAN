@@ -367,3 +367,81 @@ def test_ai_quota_failure_falls_back_to_quant(monkeypatch):
     assert body["ai"]["available"] is False
     assert body["ai"]["fallback"] == "quant_only"
     assert body["ai"]["reason"] == "OPENAI_CREDITS_EXHAUSTED"
+
+
+def test_external_context_is_attached_to_analysis(monkeypatch):
+    from mt5titan.webapp import main as webmain
+
+    class FakeNews:
+        def context(self, **kwargs):
+            return {
+                "provider": "gdelt",
+                "available": True,
+                "risk_level": "MEDIUM",
+                "high_impact_hits": 1,
+                "articles": [{"title": "Fed rate headline", "domain": "example.com"}],
+            }
+
+    class FakeMacro:
+        def context(self):
+            return {
+                "provider": "fred",
+                "available": True,
+                "series": {
+                    "fed_funds": {
+                        "available": True,
+                        "value": 4.25,
+                        "change": 0.0,
+                        "date": "2026-09-24",
+                    }
+                },
+            }
+
+    monkeypatch.setattr(webmain, "gdelt_news", FakeNews())
+    monkeypatch.setattr(webmain, "fred_macro", FakeMacro())
+
+    market = client.get(
+        "/api/market/candles?symbol=CONTEXTTEST&timeframe=M5&source=demo&count=80"
+    ).json()
+    response = client.post(
+        "/api/analyze",
+        json={
+            "symbol": "CONTEXTTEST",
+            "timeframe": "M5",
+            "source": "demo",
+            "use_ai": False,
+            "use_external_context": True,
+            "candles": market["candles"],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["external_context"]["requested"] is True
+    assert body["external_context"]["news"]["available"] is True
+    assert body["external_context"]["macro"]["available"] is True
+
+
+def test_context_endpoint_degrades_gracefully(monkeypatch):
+    from mt5titan.webapp import main as webmain
+
+    class BrokenNews:
+        def context(self, **kwargs):
+            raise RuntimeError("news unavailable")
+
+    class NoMacro:
+        def context(self):
+            return {
+                "provider": "fred",
+                "available": False,
+                "reason": "FRED_API_KEY_NOT_CONFIGURED",
+                "series": {},
+            }
+
+    monkeypatch.setattr(webmain, "gdelt_news", BrokenNews())
+    monkeypatch.setattr(webmain, "fred_macro", NoMacro())
+
+    response = client.get("/api/context?symbol=BTCUSD")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["news"]["available"] is False
+    assert body["macro"]["available"] is False
