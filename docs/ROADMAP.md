@@ -19,13 +19,13 @@
 - [ ] Gateway Demo final — migrar somente depois do Research Engine estar estável
 
 ## Fase 2 — Research Engine
-- [ ] Backtest compartilhado
+- [x] Backtest compartilhado
 - [ ] Custos/slippage por instrumento
-- [ ] Estratégias SMA, momentum e mean reversion
-- [ ] Split development/validation/holdout
-- [ ] Walk-forward
+- [x] Estratégias SMA, momentum e mean reversion
+- [x] Split development/validation/holdout
+- [x] Walk-forward
 - [ ] Stress tests
-- [ ] Métricas: expectancy, profit factor, Sharpe, Sortino, Calmar, max DD
+- [x] Métricas: expectancy, profit factor, Sharpe, Sortino, Calmar, max DD
 - [ ] Comparação reproduzível contra baseline
 
 ## Fase 3 — Market Intelligence
