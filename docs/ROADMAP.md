@@ -29,9 +29,10 @@
 - [ ] Comparação reproduzível contra baseline
 
 ## Fase 3 — Market Intelligence
-- [ ] Feature pipeline
-- [ ] Regime detector
-- [ ] Market score por ativo
+- [x] Feature pipeline com candles fechados
+- [x] Regime detector
+- [x] Market score por ativo
+- [x] Decision Engine determinístico e sensível a regime
 - [ ] Correlação/exposição de portfólio
 - [ ] Calendário econômico
 
