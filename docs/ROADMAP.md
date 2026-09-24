@@ -37,11 +37,11 @@
 - [x] Contratos e gate de risco do calendário econômico; adapter de provedor externo fica para a Fase 4
 
 ## Fase 4 — Titan Intelligence
-- [ ] Technical agent
-- [ ] News agent
-- [ ] Macro agent
-- [ ] AI committee
-- [ ] Saída estruturada por schema
+- [x] Technical agent (provider-agnostic)
+- [x] News agent (provider-agnostic)
+- [x] Macro agent (provider-agnostic)
+- [x] AI committee com pesos explícitos e veto
+- [x] Saída estruturada por schema
 - [ ] Pesos calibrados somente com dados de desenvolvimento/validação
 - [ ] Comparação Quant vs Quant+IA
 
