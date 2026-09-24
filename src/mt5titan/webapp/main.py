@@ -14,7 +14,7 @@ from mt5titan.brokers import AvalonBrokerAdapter, PaperTradingBroker
 from mt5titan.domain import DecisionAction
 from mt5titan.intelligence import DecisionEngine, build_features, build_trade_recommendation, detect_regime, score_market
 from mt5titan.intelligence.signals import strategy_signal
-from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider
+from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider, TwelveDataMarketDataProvider
 from mt5titan.research import StrategySpec
 from mt5titan.risk import RiskEngine, RiskLimits, RiskState
 from mt5titan.storage import SQLiteStore
@@ -22,12 +22,13 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.7.1")
+app = FastAPI(title="MT5TITAN", version="0.8.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
 demo_market = DemoMarketDataProvider()
 stored_market = StoredMarketDataProvider(store)
+twelve_market = TwelveDataMarketDataProvider()
 
 
 class Candle(BaseModel):
@@ -59,7 +60,7 @@ class PaperOrderRequest(BaseModel):
 class WatchlistRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=32)
     timeframe: str = "M5"
-    source: Literal["demo", "stored"] = "demo"
+    source: Literal["demo", "stored", "twelve"] = "demo"
 
 
 class MarketImportRequest(BaseModel):
@@ -227,11 +228,14 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.7.1",
+        "version": "0.8.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
             "configured": ai_configured,
+        },
+        "market_data": {
+            "twelve_configured": bool(os.getenv("TWELVE_DATA_API_KEY")),
         },
     }
 
@@ -246,13 +250,19 @@ def diagnostics():
         db_ok = False
 
     return {
-        "app": {"status": "ok", "version": "0.7.1"},
+        "app": {"status": "ok", "version": "0.8.0"},
         "database": {"status": "ok" if db_ok else "error"},
         "quant": {"status": "ok"},
         "ai": {
             "status": "configured" if ai_key and ai_model else "not_configured",
             "api_key_present": ai_key,
             "model_present": ai_model,
+        },
+        "market_data": {
+            "twelve": {
+                "status": "configured" if os.getenv("TWELVE_DATA_API_KEY") else "not_configured",
+                "api_key_present": bool(os.getenv("TWELVE_DATA_API_KEY")),
+            }
         },
         "avalon": avalon.status(),
     }
@@ -292,10 +302,22 @@ def scan_opportunities(payload: ScannerRequest):
 
     candidates = []
     skipped = []
+    twelve_calls = 0
+    twelve_limit = max(1, min(int(os.getenv("TWELVE_DATA_SCAN_LIMIT", "6")), 25))
 
     for item in watch_items[:25]:
+        if item["source"] == "twelve":
+            if twelve_calls >= twelve_limit:
+                skipped.append({
+                    "symbol": item["symbol"],
+                    "timeframe": item["timeframe"],
+                    "source": item["source"],
+                    "reason": f"real-data scan budget reached ({twelve_limit})",
+                })
+                continue
+            twelve_calls += 1
         try:
-            provider = demo_market if item["source"] == "demo" else stored_market
+            provider = demo_market if item["source"] == "demo" else stored_market if item["source"] == "stored" else twelve_market
             batch = provider.candles(
                 symbol=item["symbol"],
                 timeframe=item["timeframe"],
@@ -485,11 +507,11 @@ def paper_settle(payload: PaperSettleRequest):
 def market_candles(
     symbol: str = "DEMO",
     timeframe: str = "M5",
-    source: Literal["demo", "stored"] = "demo",
+    source: Literal["demo", "stored", "twelve"] = "demo",
     count: int = 140,
 ):
     try:
-        provider = demo_market if source == "demo" else stored_market
+        provider = demo_market if source == "demo" else stored_market if source == "stored" else twelve_market
         batch = provider.candles(
             symbol=symbol.strip().upper(),
             timeframe=timeframe.strip().upper(),
@@ -503,6 +525,8 @@ def market_candles(
         }
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.post("/api/market/import")

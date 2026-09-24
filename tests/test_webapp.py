@@ -307,3 +307,20 @@ def test_dashboard_surfaces_analysis_errors():
     html = client.get("/").text
     assert "Erro na análise:" in html
     assert "Analisando mercado" in html
+
+
+def test_real_market_source_requires_key(monkeypatch):
+    monkeypatch.delenv("TWELVE_DATA_API_KEY", raising=False)
+    from mt5titan.webapp import main as webmain
+    webmain.twelve_market.api_key = None
+    response = client.get(
+        "/api/market/candles?symbol=EURUSD&timeframe=M5&source=twelve&count=40"
+    )
+    assert response.status_code == 503
+    assert "TWELVE_DATA_API_KEY" in response.json()["detail"]
+
+
+def test_health_reports_real_market_configuration(monkeypatch):
+    monkeypatch.setenv("TWELVE_DATA_API_KEY", "configured")
+    body = client.get("/api/health").json()
+    assert body["market_data"]["twelve_configured"] is True

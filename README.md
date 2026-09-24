@@ -171,3 +171,35 @@ ser auditável/elegível para o feedback loop.
 
 O botão **Popular demo** cria uma watchlist sintética para teste. Os preços gerados
 não são cotações reais.
+
+
+## Dados reais — Twelve Data
+
+A versão 0.8.0 adiciona uma fonte oficial de market data via Twelve Data.
+
+Configure localmente:
+
+```powershell
+$env:TWELVE_DATA_API_KEY="..."
+$env:TWELVE_DATA_SCAN_LIMIT="6"
+```
+
+Depois escolha **Twelve Data (real)** no dashboard e use símbolos como:
+
+```text
+EURUSD
+GBPUSD
+USDJPY
+XAUUSD
+BTCUSD
+AAPL
+```
+
+Símbolos Forex/cripto de seis letras são normalizados automaticamente para o formato
+da API, como `EURUSD -> EUR/USD`.
+
+O scanner limita por padrão a 6 símbolos Twelve Data por execução para reduzir o risco
+de atingir o limite do plano gratuito. O limite pode ser alterado por
+`TWELVE_DATA_SCAN_LIMIT`.
+
+A chave nunca é enviada ao navegador nem armazenada no Git.
