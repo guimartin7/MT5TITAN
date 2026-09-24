@@ -98,3 +98,10 @@ def test_paper_order_rejects_side_that_disagrees_with_analysis():
         },
     )
     assert response.status_code == 422
+
+
+def test_dashboard_javascript_is_not_escaped():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "\\nlet lastAnalysisId" not in response.text
+    assert "\\n  lastAnalysisId" not in response.text
