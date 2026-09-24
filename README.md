@@ -6,8 +6,9 @@ O projeto deixou de ser uma aplicação dependente do MetaTrader 5 e passou a se
 
 A aplicação funciona hoje com:
 
-- dashboard web;
+- dashboard web com watchlist e seleção de fonte de dados;
 - API REST;
+- market data desacoplado do broker (Demo + dados importados);
 - análise quantitativa;
 - feature pipeline;
 - detector de regime;
@@ -83,3 +84,17 @@ data/mt5titan.db
 
 O SQLite guarda o saldo paper, operações abertas/fechadas e o histórico das análises.
 O diretório `data/` fica fora do Git.
+
+
+## Market data
+
+A aplicação possui uma camada independente da corretora:
+
+- `demo`: série determinística para desenvolvimento e testes;
+- `stored`: candles importados pelo usuário e persistidos no SQLite.
+
+No dashboard, escolha a fonte, ativo e timeframe. Arquivos JSON podem conter diretamente
+um array de candles ou um objeto com a propriedade `candles`.
+
+Isso permite validar o motor Quant/Risk com dados externos sem depender de endpoints
+privados da corretora.
