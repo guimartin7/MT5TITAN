@@ -1,72 +1,73 @@
-# MT5TITAN
+# MT5TITAN — Trade Intelligence
 
-Laboratório de trading quantitativo e automação com MetaTrader 5, criado como evolução arquitetural do Projeto-MT5.
+O projeto deixou de ser uma aplicação dependente do MetaTrader 5 e passou a ser uma aplicação web de inteligência para trading, com arquitetura de broker desacoplada.
 
-> Estado atual: fundação arquitetural. Nenhuma estratégia ou IA está autorizada a operar capital real.
+## Estado atual
 
-## Princípios
+A aplicação funciona hoje com:
 
-1. **IA não envia ordens diretamente.**
-2. **Risco é soberano:** qualquer sinal pode ser vetado.
-3. **Signal, Risk e Execution são camadas separadas.**
-4. **Paper/Demo antes de qualquer execução real.**
-5. **Toda decisão deve ser auditável e reproduzível.**
-6. **Holdout não é reutilizado para ajuste de estratégia.**
-7. **Resultado incerto de execução bloqueia novas ordens até reconciliação.**
+- dashboard web;
+- API REST;
+- análise quantitativa;
+- feature pipeline;
+- detector de regime;
+- market score;
+- Decision Engine;
+- Risk Engine;
+- agentes de IA e AI Committee;
+- paper trading funcional;
+- research/backtest/walk-forward;
+- replay e auditoria;
+- adapter de broker desacoplado.
 
-## Fluxo alvo
+## Avalon Broker
+
+Existe um boundary `AvalonBrokerAdapter`, porém a execução real permanece desabilitada enquanto não houver uma API/SDK oficial documentada ou integração fornecida/autorizada pela corretora.
+
+O projeto não depende de endpoints privados do navegador e não automatiza cliques na plataforma.
+
+## Rodando a aplicação
+
+```powershell
+python -m pip install -e ".[dev,web]"
+mt5titan-web
+```
+
+Abra:
 
 ```text
-Market Data
-   ↓
-Market Snapshot
-   ↓
-Strategies / Quant Models
-   ↓
-AI Committee (futuro)
-   ↓
+http://127.0.0.1:8000
+```
+
+No dashboard, use **Analisar demo** para executar o pipeline completo e abrir operações no paper broker.
+
+## Arquitetura
+
+```text
+Market Data / Replay
+        ↓
+Feature Pipeline
+        ↓
+Regime + Market Score
+        ↓
+Quant Strategies
+        ↓
+AI Committee
+        ↓
 Decision Engine
-   ↓
+        ↓
 Risk Engine
-   ↓
-Execution Policy
-   ↓
-Reconciliation
-   ↓
-Preflight / order_check
-   ↓
-Execution Gateway
-   ↓
-MT5 Demo
+        ↓
+Broker Adapter
+       / \
+ Paper    Avalon
+  ✅       aguardando API oficial
 ```
-
-## Estrutura inicial
-
-```text
-src/mt5titan/
-├── domain/
-├── market/
-├── risk/
-└── execution/
-
-tests/
-docs/
-```
-
-## Objetivo
-
-Construir um sistema que permita comparar de forma mensurável:
-
-- baseline quantitativo;
-- estratégia quantitativa;
-- quant + agente de IA;
-- quant + múltiplos agentes;
-- diferentes regimes de mercado.
-
-A IA só permanece no fluxo se demonstrar ganho fora da amostra depois de custos.
 
 ## Segurança
 
-O repositório nasce sem integração de ordem real. A futura execução Demo manterá as barreiras já experimentadas no Projeto-MT5: autorização explícita, `order_check`, journal persistente, reconciliação, kill switch e limites de perda/exposição.
-
-Veja [docs/ROADMAP.md](docs/ROADMAP.md).
+- IA nunca executa ordens diretamente.
+- Risk Engine continua soberano.
+- Paper trading é o único modo de execução habilitado por padrão.
+- Credenciais ficam fora do repositório.
+- Integrações de corretora ficam isoladas em `mt5titan.brokers`.
