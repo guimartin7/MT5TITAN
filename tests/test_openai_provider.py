@@ -75,3 +75,25 @@ def test_model_must_be_configured(monkeypatch):
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
     with pytest.raises(RuntimeError, match="OPENAI_MODEL"):
         OpenAIProvider(client=FakeClient("{}"))
+
+
+class BrokenResponses:
+    def create(self, **kwargs):
+        raise Exception("simulated upstream failure")
+
+
+class BrokenClient:
+    responses = BrokenResponses()
+
+
+def test_openai_sdk_error_is_wrapped():
+    provider = OpenAIProvider(model="test-model", client=BrokenClient())
+    with pytest.raises(RuntimeError) as exc:
+        provider.structured_decision(
+            agent_name="technical",
+            system_instruction="test",
+            context=context(),
+            schema={"type": "object"},
+        )
+    assert "OpenAI request failed" in str(exc.value)
+    assert "simulated upstream failure" in str(exc.value)
