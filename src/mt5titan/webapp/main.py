@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -14,10 +15,12 @@ from mt5titan.intelligence import DecisionEngine, build_features, detect_regime,
 from mt5titan.intelligence.signals import strategy_signal
 from mt5titan.research import StrategySpec
 from mt5titan.risk import RiskEngine, RiskLimits, RiskState
+from mt5titan.storage import SQLiteStore
 
 
-app = FastAPI(title="MT5TITAN", version="0.2.0")
-paper = PaperTradingBroker()
+app = FastAPI(title="MT5TITAN", version="0.3.0")
+store = SQLiteStore()
+paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
 
 
@@ -134,7 +137,7 @@ def _analyze(payload: AnalyzeRequest) -> dict:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": "0.3.0", "persistence": "sqlite"}
 
 
 @app.get("/api/brokers")
@@ -145,14 +148,27 @@ def broker_status():
 @app.post("/api/analyze")
 def analyze(payload: AnalyzeRequest):
     try:
-        return _analyze(payload)
+        report = _analyze(payload)
+        analysis_id = store.save_analysis(report, datetime.now(timezone.utc).isoformat())
+        report["analysis_id"] = analysis_id
+        return report
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/analyses")
+def analyses(limit: int = 50):
+    return {"items": store.recent_analyses(limit)}
 
 
 @app.get("/api/paper")
 def paper_status():
     return paper.snapshot()
+
+
+@app.post("/api/paper/reset")
+def paper_reset():
+    return paper.reset()
 
 
 @app.post("/api/paper/order")
