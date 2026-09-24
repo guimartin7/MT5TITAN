@@ -105,3 +105,41 @@ def test_dashboard_javascript_is_not_escaped():
     assert response.status_code == 200
     assert "\\nlet lastAnalysisId" not in response.text
     assert "\\n  lastAnalysisId" not in response.text
+
+
+def test_market_import_and_stored_source():
+    demo = client.get("/api/market/candles?symbol=IMPORTTEST&timeframe=M5&source=demo&count=40").json()
+    imported = client.post(
+        "/api/market/import",
+        json={
+            "symbol": "IMPORTTEST",
+            "timeframe": "M5",
+            "candles": demo["candles"],
+        },
+    )
+    assert imported.status_code == 200
+    assert imported.json()["imported"] == 40
+
+    stored = client.get(
+        "/api/market/candles?symbol=IMPORTTEST&timeframe=M5&source=stored&count=40"
+    )
+    assert stored.status_code == 200
+    assert stored.json()["source"] == "stored"
+    assert len(stored.json()["candles"]) == 40
+
+
+def test_watchlist_api_round_trip():
+    client.delete("/api/watchlist?symbol=WATCHTEST&timeframe=M15&source=demo")
+    created = client.post(
+        "/api/watchlist",
+        json={"symbol": "WATCHTEST", "timeframe": "M15", "source": "demo"},
+    )
+    assert created.status_code == 200
+
+    items = client.get("/api/watchlist").json()["items"]
+    assert {"symbol": "WATCHTEST", "timeframe": "M15", "source": "demo"} in items
+
+    removed = client.delete(
+        "/api/watchlist?symbol=WATCHTEST&timeframe=M15&source=demo"
+    )
+    assert removed.status_code == 200
