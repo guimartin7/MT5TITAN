@@ -2,7 +2,7 @@ name: tests
 
 on:
   push:
-    branches: ["main", "bootstrap/titan-v2"]
+    branches: ["main", "bootstrap/titan-v2", "migration/avalon-webapp"]
   pull_request:
 
 jobs:
