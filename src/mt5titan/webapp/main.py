@@ -13,6 +13,7 @@ from mt5titan.brokers import AvalonBrokerAdapter, PaperTradingBroker
 from mt5titan.domain import DecisionAction
 from mt5titan.intelligence import DecisionEngine, build_features, detect_regime, score_market
 from mt5titan.intelligence.signals import strategy_signal
+from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider
 from mt5titan.research import StrategySpec
 from mt5titan.risk import RiskEngine, RiskLimits, RiskState
 from mt5titan.storage import SQLiteStore
@@ -22,6 +23,8 @@ app = FastAPI(title="MT5TITAN", version="0.3.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
+demo_market = DemoMarketDataProvider()
+stored_market = StoredMarketDataProvider(store)
 
 
 class Candle(BaseModel):
@@ -46,6 +49,18 @@ class PaperOrderRequest(BaseModel):
     side: Literal["BUY", "SELL"]
     stake: float = Field(gt=0)
     price: float = Field(gt=0)
+
+
+class WatchlistRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    timeframe: str = "M5"
+    source: Literal["demo", "stored"] = "demo"
+
+
+class MarketImportRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    timeframe: str = "M5"
+    candles: list[Candle] = Field(min_length=30)
 
 
 class PaperSettleRequest(BaseModel):
@@ -200,26 +215,72 @@ def paper_settle(payload: PaperSettleRequest):
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+@app.get("/api/market/candles")
+def market_candles(
+    symbol: str = "DEMO",
+    timeframe: str = "M5",
+    source: Literal["demo", "stored"] = "demo",
+    count: int = 140,
+):
+    try:
+        provider = demo_market if source == "demo" else stored_market
+        batch = provider.candles(
+            symbol=symbol.strip().upper(),
+            timeframe=timeframe.strip().upper(),
+            count=count,
+        )
+        return {
+            "source": batch.source,
+            "symbol": batch.symbol,
+            "timeframe": batch.timeframe,
+            "candles": batch.candles,
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/market/import")
+def market_import(payload: MarketImportRequest):
+    try:
+        candles = [candle.model_dump() for candle in payload.candles]
+        count = store.replace_market_candles(
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+            candles=candles,
+        )
+        return {
+            "source": "stored",
+            "symbol": payload.symbol.upper(),
+            "timeframe": payload.timeframe.upper(),
+            "imported": count,
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/watchlist")
+def watchlist():
+    return {"items": store.list_watchlist()}
+
+
+@app.post("/api/watchlist")
+def watchlist_add(payload: WatchlistRequest):
+    try:
+        return store.add_watchlist(**payload.model_dump())
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.delete("/api/watchlist")
+def watchlist_remove(symbol: str, timeframe: str = "M5", source: str = "demo"):
+    store.remove_watchlist(symbol=symbol, timeframe=timeframe, source=source)
+    return {"removed": True}
+
+
 @app.get("/api/demo/candles")
 def demo_candles(count: int = 120):
-    count = max(30, min(count, 500))
-    price = 100.0
-    rows = []
-    for index in range(count):
-        cycle = (index // 35) % 3
-        drift = 0.22 if cycle == 0 else -0.16 if cycle == 1 else (0.04 if index % 2 == 0 else -0.04)
-        open_price = price
-        price = max(10.0, price + drift)
-        rows.append({
-            "time": 1_700_000_000 + index * 300,
-            "open": round(open_price, 4),
-            "high": round(max(open_price, price) + 0.08, 4),
-            "low": round(min(open_price, price) - 0.08, 4),
-            "close": round(price, 4),
-            "spread": 0.01,
-            "tick_volume": 100 + index,
-        })
-    return {"symbol": "DEMO", "timeframe": "M5", "candles": rows}
+    batch = demo_market.candles(symbol="DEMO", timeframe="M5", count=count)
+    return {"symbol": batch.symbol, "timeframe": batch.timeframe, "candles": batch.candles}
 
 
 @app.get("/", response_class=HTMLResponse)
