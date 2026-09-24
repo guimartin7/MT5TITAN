@@ -250,7 +250,7 @@ def diagnostics():
         db_ok = False
 
     return {
-        "app": {"status": "ok", "version": "0.7.1"},
+        "app": {"status": "ok", "version": "0.8.0"},
         "database": {"status": "ok" if db_ok else "error"},
         "quant": {"status": "ok"},
         "ai": {
@@ -302,8 +302,20 @@ def scan_opportunities(payload: ScannerRequest):
 
     candidates = []
     skipped = []
+    twelve_calls = 0
+    twelve_limit = max(1, min(int(os.getenv("TWELVE_DATA_SCAN_LIMIT", "6")), 25))
 
     for item in watch_items[:25]:
+        if item["source"] == "twelve":
+            if twelve_calls >= twelve_limit:
+                skipped.append({
+                    "symbol": item["symbol"],
+                    "timeframe": item["timeframe"],
+                    "source": item["source"],
+                    "reason": f"real-data scan budget reached ({twelve_limit})",
+                })
+                continue
+            twelve_calls += 1
         try:
             provider = demo_market if item["source"] == "demo" else stored_market if item["source"] == "stored" else twelve_market
             batch = provider.candles(
@@ -513,6 +525,8 @@ def market_candles(
         }
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.post("/api/market/import")
