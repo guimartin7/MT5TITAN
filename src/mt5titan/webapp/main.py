@@ -14,7 +14,7 @@ from mt5titan.brokers import AvalonBrokerAdapter, PaperTradingBroker
 from mt5titan.domain import DecisionAction
 from mt5titan.intelligence import DecisionEngine, build_features, build_trade_recommendation, detect_regime, score_market
 from mt5titan.intelligence.signals import strategy_signal
-from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider
+from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider, TwelveDataMarketDataProvider
 from mt5titan.research import StrategySpec
 from mt5titan.risk import RiskEngine, RiskLimits, RiskState
 from mt5titan.storage import SQLiteStore
@@ -22,12 +22,13 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.7.1")
+app = FastAPI(title="MT5TITAN", version="0.8.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
 demo_market = DemoMarketDataProvider()
 stored_market = StoredMarketDataProvider(store)
+twelve_market = TwelveDataMarketDataProvider()
 
 
 class Candle(BaseModel):
@@ -59,7 +60,7 @@ class PaperOrderRequest(BaseModel):
 class WatchlistRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=32)
     timeframe: str = "M5"
-    source: Literal["demo", "stored"] = "demo"
+    source: Literal["demo", "stored", "twelve"] = "demo"
 
 
 class MarketImportRequest(BaseModel):
@@ -227,11 +228,14 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.7.1",
+        "version": "0.8.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
             "configured": ai_configured,
+        },
+        "market_data": {
+            "twelve_configured": bool(os.getenv("TWELVE_DATA_API_KEY")),
         },
     }
 
@@ -253,6 +257,12 @@ def diagnostics():
             "status": "configured" if ai_key and ai_model else "not_configured",
             "api_key_present": ai_key,
             "model_present": ai_model,
+        },
+        "market_data": {
+            "twelve": {
+                "status": "configured" if os.getenv("TWELVE_DATA_API_KEY") else "not_configured",
+                "api_key_present": bool(os.getenv("TWELVE_DATA_API_KEY")),
+            }
         },
         "avalon": avalon.status(),
     }
@@ -295,7 +305,7 @@ def scan_opportunities(payload: ScannerRequest):
 
     for item in watch_items[:25]:
         try:
-            provider = demo_market if item["source"] == "demo" else stored_market
+            provider = demo_market if item["source"] == "demo" else stored_market if item["source"] == "stored" else twelve_market
             batch = provider.candles(
                 symbol=item["symbol"],
                 timeframe=item["timeframe"],
@@ -485,11 +495,11 @@ def paper_settle(payload: PaperSettleRequest):
 def market_candles(
     symbol: str = "DEMO",
     timeframe: str = "M5",
-    source: Literal["demo", "stored"] = "demo",
+    source: Literal["demo", "stored", "twelve"] = "demo",
     count: int = 140,
 ):
     try:
-        provider = demo_market if source == "demo" else stored_market
+        provider = demo_market if source == "demo" else stored_market if source == "stored" else twelve_market
         batch = provider.candles(
             symbol=symbol.strip().upper(),
             timeframe=timeframe.strip().upper(),
