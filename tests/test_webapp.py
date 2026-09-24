@@ -1,6 +1,8 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
-from mt5titan.webapp.main import app
+from mt5titan.webapp.main import app, store
 
 
 client = TestClient(app)
@@ -25,17 +27,74 @@ def test_demo_analysis_end_to_end():
     )
     assert response.status_code == 200
     body = response.json()
+    assert body["analysis_id"] > 0
     assert body["decision"]["action"] in {"BUY", "SELL", "HOLD"}
     assert body["execution"]["live_enabled"] is False
     assert body["execution"]["paper_enabled"] is True
 
 
-def test_paper_order_is_functional():
+def test_paper_order_requires_matching_approved_analysis():
+    client.post("/api/paper/reset")
+    analysis_id = store.save_analysis(
+        {
+            "symbol": "DEMO",
+            "timeframe": "M5",
+            "regime": {"value": "TRENDING"},
+            "market_score": {"total": 80.0},
+            "decision": {
+                "id": "approved-buy",
+                "action": "BUY",
+                "confidence": 0.8,
+                "score": 0.7,
+            },
+            "risk": {"allowed": True},
+        },
+        datetime.now(timezone.utc).isoformat(),
+    )
+
     before = client.get("/api/paper").json()["balance"]
     response = client.post(
         "/api/paper/order",
-        json={"symbol": "DEMO", "side": "BUY", "stake": 10, "price": 100},
+        json={
+            "analysis_id": analysis_id,
+            "symbol": "DEMO",
+            "side": "BUY",
+            "stake": 10,
+            "price": 100,
+        },
     )
+
     assert response.status_code == 200
+    assert response.json()["analysis_id"] == analysis_id
     after = client.get("/api/paper").json()["balance"]
     assert after == before - 10
+
+
+def test_paper_order_rejects_side_that_disagrees_with_analysis():
+    analysis_id = store.save_analysis(
+        {
+            "symbol": "DEMO",
+            "timeframe": "M5",
+            "regime": {"value": "TRENDING"},
+            "market_score": {"total": 80.0},
+            "decision": {
+                "id": "approved-sell",
+                "action": "SELL",
+                "confidence": 0.8,
+                "score": -0.7,
+            },
+            "risk": {"allowed": True},
+        },
+        datetime.now(timezone.utc).isoformat(),
+    )
+    response = client.post(
+        "/api/paper/order",
+        json={
+            "analysis_id": analysis_id,
+            "symbol": "DEMO",
+            "side": "BUY",
+            "stake": 10,
+            "price": 100,
+        },
+    )
+    assert response.status_code == 422
