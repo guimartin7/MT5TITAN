@@ -155,6 +155,23 @@ class SQLiteStore:
             )
             return int(cursor.lastrowid)
 
+    def get_analysis(self, analysis_id: int) -> dict[str, Any]:
+        with self.connect() as db:
+            row = db.execute(
+                """
+                SELECT id, created_at_utc, symbol, timeframe, decision_id, action,
+                       confidence, score, regime, market_score, risk_allowed, payload_json
+                FROM analyses
+                WHERE id = ?
+                """,
+                (analysis_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError("analysis not found")
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
     def recent_analyses(self, limit: int = 50) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 200))
         with self.connect() as db:
