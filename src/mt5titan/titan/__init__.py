@@ -1,9 +1,11 @@
 """Provider-agnostic Titan intelligence agents."""
 
 from .agents import MacroAgent, NewsAgent, TechnicalAgent
+from .benchmark import PromotionPolicy, compare_quant_vs_ai
 from .committee import AICommittee, CommitteePolicy
 from .models import AgentContext, AgentOpinion, AgentVerdict
 from .provider import ModelProvider
+from .replay import OpinionReplayStore
 
 __all__ = [
     "AICommittee",
@@ -14,5 +16,8 @@ __all__ = [
     "MacroAgent",
     "ModelProvider",
     "NewsAgent",
+    "OpinionReplayStore",
+    "PromotionPolicy",
     "TechnicalAgent",
+    "compare_quant_vs_ai",
 ]
