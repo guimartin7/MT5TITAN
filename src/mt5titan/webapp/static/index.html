@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MT5TITAN — Trade Intelligence</title>
+  <style>
+    :root{font-family:Inter,system-ui,sans-serif;background:#0c0f14;color:#f3f5f7}
+    body{margin:0;background:#0c0f14}.wrap{max-width:1180px;margin:auto;padding:32px}
+    .top{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:24px}
+    h1{margin:0;font-size:28px}.muted{color:#9299a5}.badge{padding:8px 12px;border-radius:999px;background:#171c24}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:#121720;border:1px solid #242b36;border-radius:16px;padding:18px}
+    .wide{grid-column:span 8}.side{grid-column:span 4}.full{grid-column:span 12}
+    button,input,select{background:#0d1219;color:#fff;border:1px solid #303845;border-radius:10px;padding:10px 12px}
+    button{cursor:pointer;font-weight:700}.primary{background:#f3f5f7;color:#0c0f14}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0a0e13;border-radius:12px;padding:14px;max-height:420px;overflow:auto}
+    .metric{font-size:28px;font-weight:800}.ok{color:#7ee787}.warn{color:#f2cc60}.danger{color:#ff7b72}
+    table{width:100%;border-collapse:collapse}td,th{text-align:left;border-bottom:1px solid #242b36;padding:10px}
+    @media(max-width:800px){.wide,.side,.full{grid-column:span 12}.wrap{padding:18px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>MT5TITAN</h1>
+      <div class="muted">Trade Intelligence Web App</div>
+    </div>
+    <div id="brokerBadge" class="badge">carregando...</div>
+  </div>
+
+  <div class="grid">
+    <section class="card wide">
+      <h2>Análise</h2>
+      <div class="row">
+        <input id="symbol" value="DEMO" placeholder="Ativo">
+        <select id="timeframe"><option>M5</option><option>M15</option><option>H1</option></select>
+        <button class="primary" onclick="runDemo()">Analisar demo</button>
+      </div>
+      <div style="margin-top:20px" class="grid">
+        <div class="card side"><div class="muted">Regime</div><div id="regime" class="metric">—</div></div>
+        <div class="card side"><div class="muted">Market Score</div><div id="score" class="metric">—</div></div>
+        <div class="card side"><div class="muted">Decisão</div><div id="decision" class="metric">—</div></div>
+      </div>
+      <h3>Sinais</h3>
+      <div id="signals"></div>
+    </section>
+
+    <aside class="card side">
+      <h2>Paper Broker</h2>
+      <div class="muted">Saldo</div>
+      <div id="balance" class="metric">—</div>
+      <div class="row" style="margin-top:16px">
+        <input id="stake" type="number" value="100" min="1" style="width:90px">
+        <button onclick="paperOrder('BUY')">BUY</button>
+        <button onclick="paperOrder('SELL')">SELL</button>
+      </div>
+      <div id="paperMsg" class="muted" style="margin-top:12px"></div>
+    </aside>
+
+    <section class="card full">
+      <h2>Último relatório</h2>
+      <pre id="report">Clique em “Analisar demo”.</pre>
+    </section>
+  </div>
+</div>
+
+<script>
+let lastPrice = null;
+
+async function json(url, options={}) {
+  const response = await fetch(url, options);
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.detail || 'Erro na API');
+  return body;
+}
+
+async function refresh() {
+  const brokers = await json('/api/brokers');
+  const paper = await json('/api/paper');
+  document.getElementById('balance').textContent = '$ ' + paper.balance.toFixed(2);
+  document.getElementById('brokerBadge').textContent =
+    'Paper: ON · Avalon: ' + (brokers.avalon.connected ? 'ON' : 'aguardando API oficial');
+}
+
+async function runDemo() {
+  const demo = await json('/api/demo/candles?count=140');
+  lastPrice = demo.candles[demo.candles.length - 1].close;
+  const payload = {
+    symbol: document.getElementById('symbol').value || demo.symbol,
+    timeframe: document.getElementById('timeframe').value,
+    candles: demo.candles
+  };
+  const result = await json('/api/analyze', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  });
+  document.getElementById('regime').textContent = result.regime.value;
+  document.getElementById('score').textContent = result.market_score.total;
+  document.getElementById('decision').textContent = result.decision.action;
+  document.getElementById('signals').innerHTML = '<table><tr><th>Fonte</th><th>Ação</th><th>Confiança</th></tr>' +
+    result.signals.map(s => '<tr><td>'+s.source+'</td><td>'+s.action+'</td><td>'+Math.round(s.confidence*100)+'%</td></tr>').join('') + '</table>';
+  document.getElementById('report').textContent = JSON.stringify(result, null, 2);
+}
+
+async function paperOrder(side) {
+  if (!lastPrice) return document.getElementById('paperMsg').textContent='Rode uma análise primeiro.';
+  try {
+    const trade = await json('/api/paper/order', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        symbol:document.getElementById('symbol').value || 'DEMO',
+        side,
+        stake:Number(document.getElementById('stake').value),
+        price:lastPrice
+      })
+    });
+    document.getElementById('paperMsg').textContent='Paper trade #' + trade.trade_id + ' aberto.';
+    await refresh();
+  } catch (e) {
+    document.getElementById('paperMsg').textContent=e.message;
+  }
+}
+refresh();
+</script>
+</body>
+</html>
