@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
@@ -44,11 +45,17 @@ def _symbol_query(symbol: str) -> str:
 class GdeltNewsProvider:
     name = "gdelt"
 
-    def __init__(self, opener=None):
+    def __init__(self, opener=None, cache_ttl_seconds: int = 60):
         self._opener = opener or urlopen
+        self.cache_ttl_seconds = max(0, int(cache_ttl_seconds))
+        self._cache: dict[str, tuple[float, dict]] = {}
 
     def context(self, *, symbol: str, max_records: int = 12, timespan: str = "24h") -> dict:
         max_records = max(1, min(int(max_records), 50))
+        cache_key = f"{symbol.upper()}:{max_records}:{timespan}"
+        cached = self._cache.get(cache_key)
+        if cached and time.monotonic() - cached[0] <= self.cache_ttl_seconds:
+            return dict(cached[1])
         query = urlencode({
             "query": _symbol_query(symbol),
             "mode": "artlist",
@@ -88,7 +95,7 @@ class GdeltNewsProvider:
             else "MEDIUM" if impact_hits >= 1
             else "LOW"
         )
-        return {
+        result = {
             "provider": self.name,
             "available": True,
             "query": _symbol_query(symbol),
@@ -97,6 +104,8 @@ class GdeltNewsProvider:
             "risk_level": risk_level,
             "articles": normalized,
         }
+        self._cache[cache_key] = (time.monotonic(), result)
+        return dict(result)
 
 
 class FredMacroProvider:
@@ -109,9 +118,11 @@ class FredMacroProvider:
         "broad_dollar": "DTWEXBGS",
     }
 
-    def __init__(self, api_key: str | None = None, opener=None):
+    def __init__(self, api_key: str | None = None, opener=None, cache_ttl_seconds: int = 300):
         self.api_key = api_key or os.getenv("FRED_API_KEY")
         self._opener = opener or urlopen
+        self.cache_ttl_seconds = max(0, int(cache_ttl_seconds))
+        self._cache: tuple[float, dict] | None = None
 
     def _observations(self, series_id: str, limit: int = 2) -> list[dict]:
         if not self.api_key:
@@ -137,6 +148,9 @@ class FredMacroProvider:
         ]
 
     def context(self) -> dict:
+        if self._cache and time.monotonic() - self._cache[0] <= self.cache_ttl_seconds:
+            return dict(self._cache[1])
+
         if not self.api_key:
             return {
                 "provider": self.name,
@@ -174,8 +188,10 @@ class FredMacroProvider:
                     "reason": str(error),
                 }
 
-        return {
+        result = {
             "provider": self.name,
             "available": any(row.get("available") for row in series.values()),
             "series": series,
         }
+        self._cache = (time.monotonic(), result)
+        return dict(result)
