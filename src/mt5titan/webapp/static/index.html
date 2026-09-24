@@ -37,6 +37,7 @@
           <div class="muted">Varre a watchlist com Quant e, opcionalmente, usa IA apenas nos melhores candidatos.</div>
         </div>
         <div class="row">
+          <button onclick="seedDemoWatchlist()">Popular demo</button>
           <label class="badge"><input id="scannerAi" type="checkbox"> Deep AI nos Top 3</label>
           <button class="primary" onclick="runScanner()">Escanear watchlist</button>
         </div>
@@ -158,6 +159,16 @@ function renderScanner(items) {
     '</tr>';
   }).join('');
   return '<table><tr><th>#</th><th>Ativo</th><th>Ação</th><th>Score</th><th>Conf.</th><th>Risco</th><th>Regime</th><th>Zona entrada</th><th>Invalidação</th><th>Horizonte</th><th>Motor</th><th></th></tr>'+rows+'</table>';
+}
+
+async function seedDemoWatchlist() {
+  try {
+    await json('/api/watchlist/demo-seed', {method:'POST'});
+    document.getElementById('paperMsg').textContent = 'Watchlist demo criada com dados sintéticos.';
+    await refresh();
+  } catch (e) {
+    document.getElementById('paperMsg').textContent = e.message;
+  }
 }
 
 async function runScanner() {
