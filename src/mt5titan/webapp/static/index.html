@@ -278,6 +278,12 @@ async function evaluateLastDecision() {
 }
 
 function renderAi(ai) {
+  if (ai && ai.requested && !ai.available) {
+    const label = ai.reason === 'OPENAI_CREDITS_EXHAUSTED'
+      ? 'IA indisponível: créditos da API esgotados. Quant continuou normalmente.'
+      : 'IA indisponível: '+(ai.reason || 'falha externa')+'. Quant continuou normalmente.';
+    return '<div class="warn" style="margin-top:12px">'+label+'</div>';
+  }
   if (!ai || !ai.enabled) return '<div class="muted" style="margin-top:12px">IA não utilizada nesta análise.</div>';
   const agents = ai.agents.map(a =>
     '<tr><td>'+a.agent+'</td><td>'+a.verdict+'</td><td>'+Math.round(a.confidence*100)+'%</td><td>'+a.score+'</td></tr>'
@@ -384,7 +390,10 @@ async function runMarketAnalysis() {
       result.signals.map(s => '<tr><td>'+s.source+'</td><td>'+s.action+'</td><td>'+Math.round(s.confidence*100)+'%</td></tr>').join('') + '</table>';
     document.getElementById('aiPanel').innerHTML = renderAi(result.ai);
     document.getElementById('report').textContent = JSON.stringify(result, null, 2);
-    document.getElementById('paperMsg').textContent = 'Análise concluída com sucesso.';
+    document.getElementById('paperMsg').textContent =
+      result.ai && result.ai.requested && !result.ai.available
+        ? 'Análise Quant concluída. IA indisponível nesta execução.'
+        : 'Análise concluída com sucesso.';
     await refresh();
   } catch (e) {
     document.getElementById('regime').textContent = 'ERRO';
