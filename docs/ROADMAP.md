@@ -9,13 +9,14 @@
 - [x] Testes unitários iniciais
 
 ## Fase 1 — Migração segura do Projeto-MT5
-- [ ] Adapter MetaTrader5
-- [ ] Feed health + coletor de candles fechados
-- [ ] Instrument profiles (Forex/B3)
-- [ ] Execution journal
-- [ ] Preflight Demo
-- [ ] Recovery de execução UNKNOWN
-- [ ] Paper broker unificado
+- [x] Adapter MetaTrader5
+- [x] Feed health com normalização do relógio do servidor
+- [x] Instrument profiles (base B3; Forex será expandido junto do Research Engine)
+- [x] Execution journal idempotente
+- [x] Preflight Demo sem order_send
+- [x] Recovery conservador de execução UNKNOWN
+- [x] Paper broker unificado
+- [ ] Gateway Demo final — migrar somente depois do Research Engine estar estável
 
 ## Fase 2 — Research Engine
 - [ ] Backtest compartilhado
@@ -25,6 +26,7 @@
 - [ ] Walk-forward
 - [ ] Stress tests
 - [ ] Métricas: expectancy, profit factor, Sharpe, Sortino, Calmar, max DD
+- [ ] Comparação reproduzível contra baseline
 
 ## Fase 3 — Market Intelligence
 - [ ] Feature pipeline
