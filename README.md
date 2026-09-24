@@ -203,3 +203,33 @@ de atingir o limite do plano gratuito. O limite pode ser alterado por
 `TWELVE_DATA_SCAN_LIMIT`.
 
 A chave nunca é enviada ao navegador nem armazenada no Git.
+
+
+## Contexto gratuito de News/Macro
+
+A versão 0.10.0 adiciona duas fontes externas independentes da OpenAI:
+
+- **GDELT DOC 2.0** para headlines recentes. Não exige chave.
+- **FRED** para contexto macro dos EUA. A chave é gratuita, mas opcional.
+
+Séries macro consultadas atualmente:
+
+```text
+DFF       Effective Federal Funds Rate
+DGS10     10-Year Treasury
+VIXCLS    VIX
+DTWEXBGS  Broad Dollar Index
+```
+
+Para habilitar FRED:
+
+```powershell
+$env:FRED_API_KEY="SUA_CHAVE"
+```
+
+No dashboard, **News/Macro** vem marcado por padrão. A análise não falha se GDELT
+ou FRED estiverem indisponíveis; o contexto é marcado como indisponível e o Quant
+continua funcionando.
+
+As headlines são usadas como contexto/risk awareness, não como ordem automática
+nem como prova de direção do mercado. O FRED também é contexto, não gatilho isolado.
