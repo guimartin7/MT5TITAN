@@ -324,3 +324,9 @@ def test_health_reports_real_market_configuration(monkeypatch):
     monkeypatch.setenv("TWELVE_DATA_API_KEY", "configured")
     body = client.get("/api/health").json()
     assert body["market_data"]["twelve_configured"] is True
+
+
+def test_dashboard_handles_non_json_errors():
+    html = client.get("/").text
+    assert "const raw = await response.text()" in html
+    assert "Resposta inválida da API" in html
