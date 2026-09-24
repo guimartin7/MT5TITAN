@@ -66,7 +66,7 @@
 </div>
 
 <script>
-let lastPrice = null;
+let lastPrice = null;\nlet lastAnalysisId = null;\nlet lastDecision = null;
 
 async function json(url, options={}) {
   const response = await fetch(url, options);
@@ -127,20 +127,19 @@ async function runDemo() {
   });
   document.getElementById('regime').textContent = result.regime.value;
   document.getElementById('score').textContent = result.market_score.total;
-  document.getElementById('decision').textContent = result.decision.action;
+  document.getElementById('decision').textContent = result.decision.action;\n  lastAnalysisId = result.analysis_id;\n  lastDecision = result.decision.action;
   document.getElementById('signals').innerHTML = '<table><tr><th>Fonte</th><th>Ação</th><th>Confiança</th></tr>' +
     result.signals.map(s => '<tr><td>'+s.source+'</td><td>'+s.action+'</td><td>'+Math.round(s.confidence*100)+'%</td></tr>').join('') + '</table>';
   document.getElementById('report').textContent = JSON.stringify(result, null, 2);\n  await refresh();
 }
 
 async function paperOrder(side) {
-  if (!lastPrice) return document.getElementById('paperMsg').textContent='Rode uma análise primeiro.';
+  if (!lastPrice || !lastAnalysisId) return document.getElementById('paperMsg').textContent='Rode uma análise primeiro.';\n  if (lastDecision === 'HOLD') return document.getElementById('paperMsg').textContent='A última decisão foi HOLD.';\n  if (side !== lastDecision) return document.getElementById('paperMsg').textContent='O lado precisa coincidir com a decisão '+lastDecision+'.';
   try {
     const trade = await json('/api/paper/order', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        symbol:document.getElementById('symbol').value || 'DEMO',
+      body:JSON.stringify({\n        analysis_id:lastAnalysisId,\n        symbol:document.getElementById('symbol').value || 'DEMO',
         side,
         stake:Number(document.getElementById('stake').value),
         price:lastPrice
