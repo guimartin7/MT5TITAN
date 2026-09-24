@@ -116,9 +116,26 @@ let lastDecision = null;
 
 async function json(url, options={}) {
   const response = await fetch(url, options);
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.detail || 'Erro na API');
-  return body;
+  const raw = await response.text();
+  let body = null;
+
+  if (raw) {
+    try {
+      body = JSON.parse(raw);
+    } catch (_) {
+      body = null;
+    }
+  }
+
+  if (!response.ok) {
+    const detail = body && body.detail
+      ? body.detail
+      : raw || ('Erro HTTP ' + response.status);
+    throw new Error(detail);
+  }
+
+  if (body !== null) return body;
+  throw new Error('Resposta inválida da API: JSON esperado.');
 }
 
 async function refresh() {
