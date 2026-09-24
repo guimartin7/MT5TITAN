@@ -42,7 +42,7 @@
           <button class="primary" onclick="runScanner()">Escanear watchlist</button>
         </div>
       </div>
-      <div id="scannerResults" style="margin-top:14px"><div class="muted">Adicione ativos à watchlist e execute o scanner.</div></div>
+      <div id="scannerResults" style="margin-top:14px"><div class="muted">Adicione ativos à watchlist. Use Demo/Importado ou Twelve Data para candles reais.</div></div>
     </section>
 
     <section class="card wide">
@@ -50,7 +50,7 @@
       <div class="row">
         <input id="symbol" value="DEMO" placeholder="Ativo">
         <select id="timeframe"><option>M1</option><option selected>M5</option><option>M15</option><option>H1</option></select>
-        <select id="source"><option value="demo">Demo</option><option value="stored">Importado</option></select>
+        <select id="source"><option value="demo">Demo</option><option value="stored">Importado</option><option value="twelve">Twelve Data (real)</option></select>
         <button class="primary" onclick="runMarketAnalysis()">Analisar</button>
         <label class="badge"><input id="useAi" type="checkbox"> IA</label>
         <button onclick="addWatchlist()">+ Watchlist</button>
@@ -128,7 +128,8 @@ async function refresh() {
   document.getElementById('balance').textContent = '$ ' + paper.balance.toFixed(2);
   document.getElementById('brokerBadge').textContent =
     'Paper: ON · Avalon: ' + (brokers.avalon.connected ? 'ON' : 'aguardando API oficial') +
-    ' · IA: ' + (health.ai.configured ? 'configurada' : 'OFF');
+    ' · IA: ' + (health.ai.configured ? 'configurada' : 'OFF') +
+    ' · Market: ' + (health.market_data.twelve_configured ? 'REAL ON' : 'demo/importado');
   document.getElementById('paperTrades').innerHTML = renderPaper(paper);
   const history = await json('/api/analyses?limit=12');
   document.getElementById('analysisHistory').innerHTML = renderHistory(history.items);
