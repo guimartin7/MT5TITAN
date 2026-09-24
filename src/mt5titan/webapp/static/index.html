@@ -64,6 +64,15 @@
     </aside>
 
     <section class="card full">
+      <h2>Avaliação das decisões</h2>
+      <div class="row">
+        <input id="outcomePrice" type="number" step="any" placeholder="Preço futuro">
+        <button onclick="evaluateLastDecision()">Avaliar última decisão</button>
+      </div>
+      <div id="outcomeStats" style="margin-top:14px"></div>
+    </section>
+
+    <section class="card full">
       <h2>Último relatório</h2>
       <pre id="report">Clique em “Analisar demo”.</pre>
     </section>
@@ -95,6 +104,8 @@ async function refresh() {
   document.getElementById('analysisHistory').innerHTML = renderHistory(history.items);
   const watch = await json('/api/watchlist');
   document.getElementById('watchlist').innerHTML = renderWatchlist(watch.items);
+  const stats = await json('/api/outcomes/stats');
+  document.getElementById('outcomeStats').innerHTML = renderOutcomeStats(stats);
 }
 
 function renderPaper(paper) {
@@ -121,6 +132,41 @@ async function resetPaper() {
   await json('/api/paper/reset', {method:'POST'});
   document.getElementById('paperMsg').textContent='Paper resetado.';
   await refresh();
+}
+
+function renderOutcomeStats(stats) {
+  const regimes = Object.entries(stats.by_regime || {}).map(([name, row]) =>
+    '<tr><td>'+name+'</td><td>'+row.trades+'</td><td>'+row.wins+'</td><td>'+row.losses+'</td><td>'+(row.win_rate_pct ?? '—')+'%</td></tr>'
+  ).join('');
+  const agents = Object.entries(stats.agents || {}).map(([name, row]) =>
+    '<tr><td>'+name+'</td><td>'+row.directional_calls+'</td><td>'+row.correct+'</td><td>'+(row.accuracy_pct ?? '—')+'%</td></tr>'
+  ).join('');
+  return '<div class="row"><div class="badge">Avaliadas: '+stats.evaluated+'</div><div class="badge">Win rate: '+(stats.win_rate_pct ?? '—')+'%</div></div>'+
+    '<h3>Por regime</h3><table><tr><th>Regime</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Win rate</th></tr>'+(regimes || '<tr><td colspan="5">Sem dados.</td></tr>')+'</table>'+
+    '<h3>Agentes IA</h3><table><tr><th>Agente</th><th>Chamadas</th><th>Corretas</th><th>Acurácia</th></tr>'+(agents || '<tr><td colspan="4">Sem outcomes de IA.</td></tr>')+'</table>';
+}
+
+async function evaluateLastDecision() {
+  if (!lastAnalysisId) {
+    document.getElementById('paperMsg').textContent = 'Rode uma análise primeiro.';
+    return;
+  }
+  const exitPrice = Number(document.getElementById('outcomePrice').value);
+  if (!exitPrice) {
+    document.getElementById('paperMsg').textContent = 'Informe o preço futuro.';
+    return;
+  }
+  try {
+    const outcome = await json('/api/outcomes', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({analysis_id:lastAnalysisId, exit_price:exitPrice})
+    });
+    document.getElementById('paperMsg').textContent = 'Outcome: '+outcome.result+' ('+outcome.directional_return_pct+'%)';
+    await refresh();
+  } catch (e) {
+    document.getElementById('paperMsg').textContent = e.message;
+  }
 }
 
 function renderAi(ai) {
