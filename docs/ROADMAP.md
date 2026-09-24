@@ -33,8 +33,8 @@
 - [x] Regime detector
 - [x] Market score por ativo
 - [x] Decision Engine determinístico e sensível a regime
-- [ ] Correlação/exposição de portfólio
-- [ ] Calendário econômico
+- [x] Correlação/exposição de portfólio
+- [x] Contratos e gate de risco do calendário econômico; adapter de provedor externo fica para a Fase 4
 
 ## Fase 4 — Titan Intelligence
 - [ ] Technical agent
