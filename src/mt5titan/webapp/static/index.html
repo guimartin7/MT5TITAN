@@ -53,6 +53,7 @@
         <select id="source"><option value="demo">Demo</option><option value="stored">Importado</option><option value="twelve">Twelve Data (real)</option></select>
         <button class="primary" onclick="runMarketAnalysis()">Analisar</button>
         <label class="badge"><input id="useAi" type="checkbox"> IA</label>
+        <label class="badge"><input id="useContext" type="checkbox"> News/Macro</label>
         <button onclick="addWatchlist()">+ Watchlist</button>
         <input id="marketFile" type="file" accept=".json,application/json" onchange="importMarketFile(this.files[0])">
       </div>
@@ -64,6 +65,7 @@
       <h3>Sinais</h3>
       <div id="signals"></div>
       <div id="aiPanel"></div>
+      <div id="contextPanel"></div>
     </section>
 
     <aside class="card side">
@@ -277,6 +279,30 @@ async function evaluateLastDecision() {
   }
 }
 
+function renderExternalContext(context) {
+  if (!context || !context.requested) {
+    return '<div class="muted" style="margin-top:12px">Contexto News/Macro não solicitado.</div>';
+  }
+
+  const news = context.news || {};
+  const macro = context.macro || {};
+  const headlines = (news.articles || []).slice(0,5).map(article =>
+    '<li>'+article.title+' <span class="muted">('+ (article.domain || 'fonte') +')</span></li>'
+  ).join('');
+
+  const macroRows = Object.entries(macro.series || {}).map(([name, row]) =>
+    '<tr><td>'+name+'</td><td>'+(row.available ? row.value : '—')+'</td><td>'+(row.change ?? '—')+'</td><td>'+(row.date || '—')+'</td></tr>'
+  ).join('');
+
+  return '<h3>Contexto externo</h3>'+
+    '<div class="row"><div class="badge">News: '+(news.available ? 'ON' : 'OFF')+'</div>'+
+    '<div class="badge">News risk: '+(news.risk_level || '—')+'</div>'+
+    '<div class="badge">Macro: '+(macro.available ? 'ON' : 'OFF')+'</div></div>'+
+    (headlines ? '<h4>Headlines recentes</h4><ul>'+headlines+'</ul>' : '<div class="muted">Sem headlines disponíveis.</div>')+
+    '<h4>Macro FRED</h4><table><tr><th>Série</th><th>Atual</th><th>Δ</th><th>Data</th></tr>'+
+    (macroRows || '<tr><td colspan="4">FRED não configurado ou indisponível.</td></tr>')+'</table>';
+}
+
 function renderAi(ai) {
   if (ai && ai.requested && !ai.available) {
     const label = ai.reason === 'OPENAI_CREDITS_EXHAUSTED'
@@ -372,6 +398,7 @@ async function runMarketAnalysis() {
       timeframe: market.timeframe,
       source: market.source,
       use_ai: useAi,
+      use_external_context: document.getElementById('useContext').checked,
       candles: market.candles
     };
 
@@ -389,6 +416,7 @@ async function runMarketAnalysis() {
     document.getElementById('signals').innerHTML = '<table><tr><th>Fonte</th><th>Ação</th><th>Confiança</th></tr>' +
       result.signals.map(s => '<tr><td>'+s.source+'</td><td>'+s.action+'</td><td>'+Math.round(s.confidence*100)+'%</td></tr>').join('') + '</table>';
     document.getElementById('aiPanel').innerHTML = renderAi(result.ai);
+    document.getElementById('contextPanel').innerHTML = renderExternalContext(result.external_context);
     document.getElementById('report').textContent = JSON.stringify(result, null, 2);
     document.getElementById('paperMsg').textContent =
       result.ai && result.ai.requested && !result.ai.available
@@ -401,6 +429,7 @@ async function runMarketAnalysis() {
     document.getElementById('decision').textContent = '—';
     document.getElementById('signals').innerHTML = '';
     document.getElementById('aiPanel').innerHTML = '';
+    document.getElementById('contextPanel').innerHTML = '';
     document.getElementById('report').textContent = 'Erro na análise: ' + e.message;
     document.getElementById('paperMsg').textContent = 'Erro na análise: ' + e.message;
   }
