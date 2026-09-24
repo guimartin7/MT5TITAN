@@ -22,7 +22,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.8.0")
+app = FastAPI(title="MT5TITAN", version="0.9.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -133,36 +133,56 @@ def _analyze(payload: AnalyzeRequest) -> dict:
             event_risk={"blocked": False, "caution": False, "relevant_events": []},
             portfolio={"allowed": True, "blockers": []},
         )
-        provider = OpenAIProvider()
-        replay_store = OpinionReplayStore(Path("replays") / "web-opinions.jsonl")
-        experiment = TitanExperiment(provider, replay_store)
-        experiment_result = experiment.run_context(
-            key=f"{payload.symbol}:{payload.timeframe}:{snapshot.timestamp}",
-            context=context,
-            metadata={"source": payload.source},
-        )
-        ai_signal = AICommittee().aggregate(list(experiment_result.opinions))
-        signals.append(ai_signal)
-        ai_payload = {
-            "enabled": True,
-            "committee": {
-                "action": ai_signal.action.value,
-                "confidence": ai_signal.confidence,
-                "score": ai_signal.score,
-                "reasons": list(ai_signal.reasons),
-            },
-            "agents": [
-                {
-                    "agent": opinion.agent,
-                    "verdict": opinion.verdict.value,
-                    "confidence": opinion.confidence,
-                    "score": opinion.score,
-                    "reason_codes": list(opinion.reason_codes),
-                    "risk_flags": list(opinion.risk_flags),
-                }
-                for opinion in experiment_result.opinions
-            ],
-        }
+        try:
+            provider = OpenAIProvider()
+            replay_store = OpinionReplayStore(Path("replays") / "web-opinions.jsonl")
+            experiment = TitanExperiment(provider, replay_store)
+            experiment_result = experiment.run_context(
+                key=f"{payload.symbol}:{payload.timeframe}:{snapshot.timestamp}",
+                context=context,
+                metadata={"source": payload.source},
+            )
+            ai_signal = AICommittee().aggregate(list(experiment_result.opinions))
+            signals.append(ai_signal)
+            ai_payload = {
+                "enabled": True,
+                "requested": True,
+                "available": True,
+                "committee": {
+                    "action": ai_signal.action.value,
+                    "confidence": ai_signal.confidence,
+                    "score": ai_signal.score,
+                    "reasons": list(ai_signal.reasons),
+                },
+                "agents": [
+                    {
+                        "agent": opinion.agent,
+                        "verdict": opinion.verdict.value,
+                        "confidence": opinion.confidence,
+                        "score": opinion.score,
+                        "reason_codes": list(opinion.reason_codes),
+                        "risk_flags": list(opinion.risk_flags),
+                    }
+                    for opinion in experiment_result.opinions
+                ],
+            }
+        except RuntimeError as error:
+            message = str(error)
+            lowered = message.lower()
+            if "credit_balance_exhausted" in lowered or "insufficient_quota" in lowered:
+                reason = "OPENAI_CREDITS_EXHAUSTED"
+            elif "ratelimit" in lowered or "rate limit" in lowered:
+                reason = "OPENAI_RATE_LIMIT"
+            else:
+                reason = "OPENAI_UNAVAILABLE"
+            ai_payload = {
+                "enabled": False,
+                "requested": True,
+                "available": False,
+                "fallback": "quant_only",
+                "reason": reason,
+                "message": message[:500],
+            }
 
     decision = DecisionEngine().decide(
         symbol=payload.symbol,
@@ -204,7 +224,12 @@ def _analyze(payload: AnalyzeRequest) -> dict:
             }
             for s in signals
         ],
-        "ai": ai_payload or {"enabled": False},
+        "ai": ai_payload or {
+            "enabled": False,
+            "requested": False,
+            "available": False,
+            "fallback": None,
+        },
         "decision": {
             "id": decision.decision_id,
             "action": decision.action.value,
@@ -228,7 +253,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.8.0",
+        "version": "0.9.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
