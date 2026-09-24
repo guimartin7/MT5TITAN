@@ -20,13 +20,13 @@
 
 ## Fase 2 — Research Engine
 - [x] Backtest compartilhado
-- [ ] Custos/slippage por instrumento
+- [x] Custos/spread por cenários fixos; slippage específico de instrumento segue na integração B3
 - [x] Estratégias SMA, momentum e mean reversion
 - [x] Split development/validation/holdout
 - [x] Walk-forward
-- [ ] Stress tests
+- [x] Stress tests
 - [x] Métricas: expectancy, profit factor, Sharpe, Sortino, Calmar, max DD
-- [ ] Comparação reproduzível contra baseline
+- [x] Comparação reproduzível contra baseline
 
 ## Fase 3 — Market Intelligence
 - [x] Feature pipeline com candles fechados
