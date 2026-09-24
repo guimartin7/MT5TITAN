@@ -41,6 +41,7 @@ class AnalyzeRequest(BaseModel):
 
 
 class PaperOrderRequest(BaseModel):
+    analysis_id: int
     symbol: str
     side: Literal["BUY", "SELL"]
     stake: float = Field(gt=0)
@@ -174,7 +175,19 @@ def paper_reset():
 @app.post("/api/paper/order")
 def paper_order(payload: PaperOrderRequest):
     try:
-        return paper.place_order(**payload.model_dump())
+        analysis = store.get_analysis(payload.analysis_id)
+        if not bool(analysis["risk_allowed"]):
+            raise ValueError("analysis was blocked by Risk Engine")
+        if analysis["action"] == "HOLD":
+            raise ValueError("HOLD analysis cannot open a trade")
+        if analysis["action"] != payload.side:
+            raise ValueError("paper side must match persisted analysis decision")
+        if analysis["symbol"] != payload.symbol:
+            raise ValueError("paper symbol must match persisted analysis")
+        order = payload.model_dump(exclude={"analysis_id"})
+        trade = paper.place_order(**order)
+        trade["analysis_id"] = payload.analysis_id
+        return trade
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
