@@ -1,0 +1,103 @@
+"""Opportunity scoring and human-readable trade recommendation."""
+from dataclasses import dataclass, asdict
+
+from mt5titan.domain import MarketRegime
+
+
+@dataclass(frozen=True)
+class TradeRecommendation:
+    action: str
+    opportunity_score: float
+    risk_level: str
+    entry_price: float
+    entry_zone_low: float
+    entry_zone_high: float
+    invalidation_price: float | None
+    horizon: str
+    reasons: tuple[str, ...]
+
+    def to_dict(self) -> dict:
+        result = asdict(self)
+        result["reasons"] = list(self.reasons)
+        return result
+
+
+def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
+    return max(low, min(high, value))
+
+
+def _horizon(timeframe: str) -> str:
+    return {
+        "M1": "3-8 min",
+        "M5": "10-30 min",
+        "M15": "30-90 min",
+        "H1": "2-6 h",
+    }.get(timeframe.upper(), "context-dependent")
+
+
+def build_trade_recommendation(report: dict) -> TradeRecommendation:
+    action = str(report["decision"]["action"])
+    decision_score = abs(float(report["decision"]["score"])) * 100.0
+    confidence = float(report["decision"]["confidence"]) * 100.0
+    market_score = float(report["market_score"]["total"])
+    regime_confidence = float(report["regime"]["confidence"]) * 100.0
+    risk_allowed = bool(report["risk"]["allowed"])
+
+    total = (
+        market_score * 0.35
+        + decision_score * 0.30
+        + confidence * 0.25
+        + regime_confidence * 0.10
+    )
+
+    if action == "HOLD":
+        total *= 0.35
+    if not risk_allowed:
+        total *= 0.25
+
+    regime = str(report["regime"]["value"])
+    if regime in {
+        MarketRegime.HIGH_VOLATILITY.value,
+        MarketRegime.UNCERTAIN.value,
+        MarketRegime.EVENT.value,
+    }:
+        risk_level = "HIGH"
+    elif market_score >= 75 and confidence >= 65:
+        risk_level = "LOW"
+    else:
+        risk_level = "MEDIUM"
+
+    entry = float(report["reference_price"])
+    average_range_pct = max(0.01, float(report["features"]["average_range_pct"]))
+    range_value = entry * average_range_pct / 100.0
+    zone_half_width = range_value * 0.20
+
+    if action == "BUY":
+        invalidation = entry - range_value * 0.90
+    elif action == "SELL":
+        invalidation = entry + range_value * 0.90
+    else:
+        invalidation = None
+
+    reasons = [
+        f"REGIME:{regime}",
+        f"MARKET_SCORE:{market_score:.2f}",
+        f"DECISION_CONFIDENCE:{confidence:.1f}",
+    ]
+    if report.get("ai", {}).get("enabled"):
+        committee = report["ai"].get("committee", {})
+        reasons.append(f"AI_COMMITTEE:{committee.get('action', 'HOLD')}")
+    if not risk_allowed:
+        reasons.extend(f"RISK_BLOCK:{reason}" for reason in report["risk"]["reasons"])
+
+    return TradeRecommendation(
+        action=action,
+        opportunity_score=round(_clamp(total), 2),
+        risk_level=risk_level,
+        entry_price=round(entry, 6),
+        entry_zone_low=round(entry - zone_half_width, 6),
+        entry_zone_high=round(entry + zone_half_width, 6),
+        invalidation_price=None if invalidation is None else round(invalidation, 6),
+        horizon=_horizon(str(report["timeframe"])),
+        reasons=tuple(reasons),
+    )
