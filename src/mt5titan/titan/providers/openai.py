@@ -39,9 +39,10 @@ class OpenAIProvider:
         context: AgentContext,
         schema: dict,
     ) -> dict:
-        response = self.client.responses.create(
-            model=self.model,
-            input=[
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                input=[
                 {
                     "role": "system",
                     "content": [
@@ -64,16 +65,24 @@ class OpenAIProvider:
                         }
                     ],
                 },
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": f"{agent_name}_decision",
-                    "strict": True,
-                    "schema": schema,
-                }
-            },
-        )
+                ],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": f"{agent_name}_decision",
+                        "strict": True,
+                        "schema": schema,
+                    }
+                },
+            )
+        except Exception as error:
+            error_type = type(error).__name__
+            message = str(error).strip() or "request failed"
+            if len(message) > 500:
+                message = message[:500] + "..."
+            raise RuntimeError(
+                f"OpenAI request failed ({error_type}): {message}"
+            ) from error
 
         output_text = getattr(response, "output_text", None)
         if not output_text:
