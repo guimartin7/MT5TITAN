@@ -289,3 +289,21 @@ def test_dashboard_contains_scanner_and_history_containers():
         'outcomeStats',
     ):
         assert f'id="{element_id}"' in html
+
+
+def test_diagnostics_endpoint(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    response = client.get("/api/diagnostics")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["app"]["status"] == "ok"
+    assert body["quant"]["status"] == "ok"
+    assert body["ai"]["status"] == "not_configured"
+    assert body["avalon"]["connected"] is False
+
+
+def test_dashboard_surfaces_analysis_errors():
+    html = client.get("/").text
+    assert "Erro na análise:" in html
+    assert "Analisando mercado" in html
