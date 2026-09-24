@@ -117,3 +117,21 @@ sem autoridade direta de execução.
 
 Se as variáveis não estiverem configuradas, o backend recusa o modo IA com erro
 explícito em vez de executar uma análise incompleta.
+
+
+## Feedback loop de decisões
+
+A versão 0.6.0 adiciona avaliação posterior das decisões.
+
+Depois de uma análise, informe um preço futuro no dashboard e clique em **Avaliar última decisão**.
+O sistema registra:
+
+- WIN / LOSS / FLAT / HOLD;
+- retorno direcional percentual;
+- win rate agregado;
+- desempenho por regime;
+- acurácia direcional dos agentes Technical, News e Macro;
+- acurácia direcional do AI Committee.
+
+Essas métricas são observacionais. Elas ainda não alteram automaticamente os pesos dos agentes;
+a calibração será uma etapa separada para evitar autoajuste com pouca amostra.

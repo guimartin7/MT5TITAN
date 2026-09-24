@@ -62,6 +62,18 @@ class SQLiteStore:
                     PRIMARY KEY(symbol, timeframe, time)
                 );
 
+                CREATE TABLE IF NOT EXISTS decision_outcomes (
+                    analysis_id INTEGER PRIMARY KEY,
+                    evaluated_at_utc TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    exit_price REAL NOT NULL,
+                    action TEXT NOT NULL,
+                    result TEXT NOT NULL,
+                    market_direction TEXT NOT NULL,
+                    directional_return_pct REAL NOT NULL,
+                    FOREIGN KEY(analysis_id) REFERENCES analyses(id)
+                );
+
                 CREATE TABLE IF NOT EXISTS analyses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at_utc TEXT NOT NULL,
@@ -282,3 +294,141 @@ class SQLiteStore:
                 (symbol.upper(), timeframe.upper(), limit),
             ).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+
+    def save_outcome(
+        self,
+        *,
+        analysis_id: int,
+        evaluated_at_utc: str,
+        entry_price: float,
+        exit_price: float,
+        action: str,
+        result: str,
+        market_direction: str,
+        directional_return_pct: float,
+    ) -> dict:
+        with self.connect() as db:
+            db.execute(
+                """
+                INSERT INTO decision_outcomes(
+                    analysis_id, evaluated_at_utc, entry_price, exit_price,
+                    action, result, market_direction, directional_return_pct
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(analysis_id) DO UPDATE SET
+                    evaluated_at_utc=excluded.evaluated_at_utc,
+                    entry_price=excluded.entry_price,
+                    exit_price=excluded.exit_price,
+                    action=excluded.action,
+                    result=excluded.result,
+                    market_direction=excluded.market_direction,
+                    directional_return_pct=excluded.directional_return_pct
+                """,
+                (
+                    analysis_id,
+                    evaluated_at_utc,
+                    entry_price,
+                    exit_price,
+                    action,
+                    result,
+                    market_direction,
+                    directional_return_pct,
+                ),
+            )
+        return self.get_outcome(analysis_id)
+
+    def get_outcome(self, analysis_id: int) -> dict:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT * FROM decision_outcomes WHERE analysis_id=?",
+                (analysis_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError("outcome not found")
+        return dict(row)
+
+    def recent_outcomes(self, limit: int = 100) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT o.*, a.symbol, a.timeframe, a.regime, a.confidence, a.market_score
+                FROM decision_outcomes o
+                JOIN analyses a ON a.id = o.analysis_id
+                ORDER BY o.analysis_id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def outcome_statistics(self) -> dict:
+        outcomes = self.recent_outcomes(500)
+        directional = [row for row in outcomes if row["action"] in {"BUY", "SELL"}]
+        wins = sum(1 for row in directional if row["result"] == "WIN")
+        losses = sum(1 for row in directional if row["result"] == "LOSS")
+        flats = sum(1 for row in directional if row["result"] == "FLAT")
+
+        by_regime: dict[str, dict] = {}
+        for row in directional:
+            bucket = by_regime.setdefault(
+                row["regime"],
+                {"trades": 0, "wins": 0, "losses": 0, "flats": 0},
+            )
+            bucket["trades"] += 1
+            if row["result"] == "WIN":
+                bucket["wins"] += 1
+            elif row["result"] == "LOSS":
+                bucket["losses"] += 1
+            else:
+                bucket["flats"] += 1
+
+        for bucket in by_regime.values():
+            resolved = bucket["wins"] + bucket["losses"]
+            bucket["win_rate_pct"] = (
+                round(bucket["wins"] / resolved * 100.0, 2) if resolved else None
+            )
+
+        agent_totals: dict[str, dict] = {}
+        for row in directional:
+            analysis = self.get_analysis(int(row["analysis_id"]))
+            payload = analysis["payload"]
+            ai = payload.get("ai") or {}
+            actual = row["market_direction"]
+            if actual not in {"BUY", "SELL"}:
+                continue
+
+            opinions = list(ai.get("agents") or [])
+            committee = ai.get("committee")
+            if committee:
+                opinions.append({
+                    "agent": "committee",
+                    "verdict": committee.get("action"),
+                })
+
+            for opinion in opinions:
+                agent = str(opinion.get("agent", "unknown"))
+                verdict = str(opinion.get("verdict", "HOLD"))
+                if verdict not in {"BUY", "SELL"}:
+                    continue
+                bucket = agent_totals.setdefault(agent, {"directional_calls": 0, "correct": 0})
+                bucket["directional_calls"] += 1
+                if verdict == actual:
+                    bucket["correct"] += 1
+
+        for bucket in agent_totals.values():
+            bucket["accuracy_pct"] = round(
+                bucket["correct"] / bucket["directional_calls"] * 100.0, 2
+            ) if bucket["directional_calls"] else None
+
+        resolved = wins + losses
+        return {
+            "evaluated": len(outcomes),
+            "directional_trades": len(directional),
+            "wins": wins,
+            "losses": losses,
+            "flats": flats,
+            "win_rate_pct": round(wins / resolved * 100.0, 2) if resolved else None,
+            "by_regime": by_regime,
+            "agents": agent_totals,
+        }

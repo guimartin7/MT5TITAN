@@ -172,3 +172,68 @@ def test_ai_mode_requires_configuration(monkeypatch):
     )
     assert response.status_code == 503
     assert "OPENAI_API_KEY" in response.json()["detail"]
+
+
+def test_decision_outcome_api_round_trip():
+    analysis_id = store.save_analysis(
+        {
+            "symbol": "OUTCOMETEST",
+            "timeframe": "M5",
+            "source": "demo",
+            "reference_price": 100.0,
+            "regime": {"value": "TRENDING"},
+            "market_score": {"total": 80.0},
+            "decision": {
+                "id": "outcome-buy",
+                "action": "BUY",
+                "confidence": 0.8,
+                "score": 0.7,
+            },
+            "risk": {"allowed": True},
+            "ai": {"enabled": False},
+        },
+        datetime.now(timezone.utc).isoformat(),
+    )
+
+    response = client.post(
+        "/api/outcomes",
+        json={"analysis_id": analysis_id, "exit_price": 103.0},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result"] == "WIN"
+    assert body["market_direction"] == "BUY"
+    assert body["directional_return_pct"] == 3.0
+
+    stats = client.get("/api/outcomes/stats")
+    assert stats.status_code == 200
+    assert stats.json()["evaluated"] >= 1
+
+
+def test_hold_outcome_is_not_counted_as_directional_trade():
+    analysis_id = store.save_analysis(
+        {
+            "symbol": "HOLDTEST",
+            "timeframe": "M5",
+            "source": "demo",
+            "reference_price": 100.0,
+            "regime": {"value": "RANGING"},
+            "market_score": {"total": 40.0},
+            "decision": {
+                "id": "hold-decision",
+                "action": "HOLD",
+                "confidence": 0.0,
+                "score": 0.0,
+            },
+            "risk": {"allowed": False},
+            "ai": {"enabled": False},
+        },
+        datetime.now(timezone.utc).isoformat(),
+    )
+
+    response = client.post(
+        "/api/outcomes",
+        json={"analysis_id": analysis_id, "exit_price": 105.0},
+    )
+    assert response.status_code == 200
+    assert response.json()["result"] == "HOLD"

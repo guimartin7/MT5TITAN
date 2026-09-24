@@ -22,7 +22,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.5.0")
+app = FastAPI(title="MT5TITAN", version="0.6.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -72,6 +72,12 @@ class PaperSettleRequest(BaseModel):
     trade_id: int
     exit_price: float = Field(gt=0)
     payout_ratio: float = Field(default=0.82, ge=0, le=2)
+
+
+class OutcomeRequest(BaseModel):
+    analysis_id: int
+    exit_price: float = Field(gt=0)
+    entry_price: float | None = Field(default=None, gt=0)
 
 
 def _specs():
@@ -166,6 +172,8 @@ def _analyze(payload: AnalyzeRequest) -> dict:
         "symbol": payload.symbol,
         "timeframe": payload.timeframe,
         "source": payload.source,
+        "market_timestamp": snapshot.timestamp,
+        "reference_price": snapshot.bid,
         "features": features.to_dict(),
         "regime": {
             "value": regime.regime.value,
@@ -213,7 +221,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -243,6 +251,62 @@ def analyze(payload: AnalyzeRequest):
 @app.get("/api/analyses")
 def analyses(limit: int = 50):
     return {"items": store.recent_analyses(limit)}
+
+
+@app.post("/api/outcomes")
+def evaluate_outcome(payload: OutcomeRequest):
+    try:
+        analysis = store.get_analysis(payload.analysis_id)
+        report = analysis["payload"]
+        action = analysis["action"]
+        entry_price = payload.entry_price or report.get("reference_price")
+        if entry_price is None:
+            raise ValueError("entry_price is required for analyses created before v0.6.0")
+
+        entry_price = float(entry_price)
+        exit_price = float(payload.exit_price)
+        if exit_price > entry_price:
+            market_direction = "BUY"
+        elif exit_price < entry_price:
+            market_direction = "SELL"
+        else:
+            market_direction = "FLAT"
+
+        if action == "HOLD":
+            result = "HOLD"
+            directional_return_pct = 0.0
+        else:
+            if market_direction == "FLAT":
+                result = "FLAT"
+            else:
+                result = "WIN" if action == market_direction else "LOSS"
+            direction = 1.0 if action == "BUY" else -1.0
+            directional_return_pct = (
+                (exit_price - entry_price) / entry_price * direction * 100.0
+            )
+
+        return store.save_outcome(
+            analysis_id=payload.analysis_id,
+            evaluated_at_utc=datetime.now(timezone.utc).isoformat(),
+            entry_price=entry_price,
+            exit_price=exit_price,
+            action=action,
+            result=result,
+            market_direction=market_direction,
+            directional_return_pct=round(directional_return_pct, 6),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/outcomes")
+def outcomes(limit: int = 100):
+    return {"items": store.recent_outcomes(limit)}
+
+
+@app.get("/api/outcomes/stats")
+def outcome_stats():
+    return store.outcome_statistics()
 
 
 @app.get("/api/paper")
