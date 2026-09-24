@@ -43,7 +43,7 @@
 - [x] AI committee com pesos explícitos e veto
 - [x] Saída estruturada por schema
 - [ ] Pesos calibrados somente com dados de desenvolvimento/validação
-- [ ] Comparação Quant vs Quant+IA
+- [x] Comparação reproduzível Quant vs Quant+IA com replay de opiniões
 
 ## Fase 5 — Operação supervisionada
 - [ ] Paper trading contínuo
