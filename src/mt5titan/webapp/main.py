@@ -507,6 +507,25 @@ def watchlist():
     return {"items": store.list_watchlist()}
 
 
+@app.post("/api/watchlist/demo-seed")
+def watchlist_demo_seed():
+    items = [
+        ("EURUSD", "M5"),
+        ("GBPUSD", "M5"),
+        ("USDJPY", "M5"),
+        ("XAUUSD", "M5"),
+        ("BTCUSD", "M5"),
+    ]
+    created = [
+        store.add_watchlist(symbol=symbol, timeframe=timeframe, source="demo")
+        for symbol, timeframe in items
+    ]
+    return {
+        "items": created,
+        "warning": "These symbols use synthetic demo candles, not live market data.",
+    }
+
+
 @app.post("/api/watchlist")
 def watchlist_add(payload: WatchlistRequest):
     try:
