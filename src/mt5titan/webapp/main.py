@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from mt5titan.brokers import AvalonBrokerAdapter, PaperTradingBroker
+from mt5titan.contextdata import FredMacroProvider, GdeltNewsProvider
 from mt5titan.domain import DecisionAction
 from mt5titan.intelligence import DecisionEngine, build_features, build_trade_recommendation, detect_regime, score_market
 from mt5titan.intelligence.signals import strategy_signal
@@ -22,13 +23,15 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.9.0")
+app = FastAPI(title="MT5TITAN", version="0.10.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
 demo_market = DemoMarketDataProvider()
 stored_market = StoredMarketDataProvider(store)
 twelve_market = TwelveDataMarketDataProvider()
+gdelt_news = GdeltNewsProvider()
+fred_macro = FredMacroProvider()
 
 
 class Candle(BaseModel):
@@ -46,6 +49,7 @@ class AnalyzeRequest(BaseModel):
     timeframe: str = "M5"
     source: str = "external"
     use_ai: bool = False
+    use_external_context: bool = False
     candles: list[Candle] = Field(min_length=30)
 
 
@@ -103,6 +107,11 @@ def _analyze(payload: AnalyzeRequest) -> dict:
     signals = [strategy_signal(bars, spec, source=spec.name) for spec in _specs()]
     quant_signals = list(signals)
     ai_payload = None
+    external_context = {
+        "requested": payload.use_external_context,
+        "news": {"available": False, "reason": "NOT_REQUESTED"},
+        "macro": {"available": False, "reason": "NOT_REQUESTED"},
+    }
 
     last = bars[-1]
     from mt5titan.domain import MarketSnapshot
@@ -116,11 +125,36 @@ def _analyze(payload: AnalyzeRequest) -> dict:
         features=features.to_dict(),
     )
 
+    if payload.use_external_context:
+        try:
+            external_context["news"] = gdelt_news.context(symbol=payload.symbol)
+        except RuntimeError as error:
+            external_context["news"] = {
+                "provider": "gdelt",
+                "available": False,
+                "reason": str(error),
+            }
+        external_context["macro"] = fred_macro.context()
+
     if payload.use_ai:
         if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENAI_MODEL"):
             raise RuntimeError(
                 "AI mode requires OPENAI_API_KEY and OPENAI_MODEL in the environment"
             )
+
+        news = external_context["news"]
+        event_risk = {
+            "blocked": False,
+            "caution": news.get("risk_level") in {"MEDIUM", "HIGH"},
+            "risk_level": news.get("risk_level"),
+            "high_impact_hits": news.get("high_impact_hits", 0),
+            "relevant_events": [
+                article.get("title")
+                for article in news.get("articles", [])[:8]
+                if article.get("title")
+            ],
+            "provider": news.get("provider"),
+        }
 
         context = build_agent_context(
             symbol=payload.symbol,
@@ -130,7 +164,8 @@ def _analyze(payload: AnalyzeRequest) -> dict:
             regime=regime,
             market_score=market,
             strategy_signals={signal.source: signal.score for signal in quant_signals},
-            event_risk={"blocked": False, "caution": False, "relevant_events": []},
+            event_risk=event_risk,
+            macro_context=external_context["macro"],
             portfolio={"allowed": True, "blockers": []},
         )
         try:
@@ -200,6 +235,7 @@ def _analyze(payload: AnalyzeRequest) -> dict:
         "timeframe": payload.timeframe,
         "source": payload.source,
         "market_timestamp": snapshot.timestamp,
+        "external_context": external_context,
         "reference_price": snapshot.bid,
         "features": features.to_dict(),
         "regime": {
@@ -253,7 +289,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.9.0",
+        "version": "0.10.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -261,6 +297,10 @@ def health():
         },
         "market_data": {
             "twelve_configured": bool(os.getenv("TWELVE_DATA_API_KEY")),
+        },
+        "context_data": {
+            "gdelt": True,
+            "fred_configured": bool(os.getenv("FRED_API_KEY")),
         },
     }
 
@@ -289,7 +329,28 @@ def diagnostics():
                 "api_key_present": bool(os.getenv("TWELVE_DATA_API_KEY")),
             }
         },
+        "context_data": {
+            "gdelt": {"status": "available_no_key"},
+            "fred": {
+                "status": "configured" if os.getenv("FRED_API_KEY") else "not_configured",
+                "api_key_present": bool(os.getenv("FRED_API_KEY")),
+            },
+        },
         "avalon": avalon.status(),
+    }
+
+
+@app.get("/api/context")
+def external_context(symbol: str = "BTCUSD"):
+    news = {"available": False}
+    try:
+        news = gdelt_news.context(symbol=symbol)
+    except RuntimeError as error:
+        news = {"provider": "gdelt", "available": False, "reason": str(error)}
+    return {
+        "symbol": symbol.upper(),
+        "news": news,
+        "macro": fred_macro.context(),
     }
 
 
