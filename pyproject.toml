@@ -4,18 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mt5titan"
-version = "0.1.0"
-description = "Arquitetura segura para pesquisa quantitativa e automação MT5."
+version = "0.2.0"
+description = "Trading intelligence web application with quantitative research, AI committee and paper execution."
 requires-python = ">=3.13"
 dependencies = ["tzdata>=2025.3"]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.1"]
-mt5 = ["MetaTrader5>=5.0.6147"]
+dev = [
+  "pytest>=9.1",
+  "fastapi>=0.115",
+  "uvicorn>=0.34",
+  "httpx>=0.28"
+]
+web = [
+  "fastapi>=0.115",
+  "uvicorn>=0.34"
+]
 ai-openai = ["openai>=2.0"]
+mt5-legacy = ["MetaTrader5>=5.0.6147"]
 
 [project.scripts]
 mt5titan-analyze = "mt5titan.app.analyze:main"
+mt5titan-web = "mt5titan.webapp.main:run"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
