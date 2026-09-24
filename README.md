@@ -98,3 +98,22 @@ um array de candles ou um objeto com a propriedade `candles`.
 
 Isso permite validar o motor Quant/Risk com dados externos sem depender de endpoints
 privados da corretora.
+
+
+## IA no web app
+
+O modo Quant continua sendo o padrão. Para habilitar os agentes no dashboard:
+
+```powershell
+python -m pip install -e ".[dev,web,ai-openai]"
+$env:OPENAI_API_KEY="..."
+$env:OPENAI_MODEL="..."
+mt5titan-web
+```
+
+Marque **IA** antes de analisar. O fluxo adiciona Technical Agent, News Agent,
+Macro Agent e AI Committee. As opiniões são persistidas em replay, mas continuam
+sem autoridade direta de execução.
+
+Se as variáveis não estiverem configuradas, o backend recusa o modo IA com erro
+explícito em vez de executar uma análise incompleta.

@@ -143,3 +143,32 @@ def test_watchlist_api_round_trip():
         "/api/watchlist?symbol=WATCHTEST&timeframe=M15&source=demo"
     )
     assert removed.status_code == 200
+
+
+def test_health_reports_ai_configuration_without_secret(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    body = client.get("/api/health").json()
+    assert body["ai"]["provider"] == "openai"
+    assert body["ai"]["configured"] is False
+    assert "api_key" not in str(body).lower()
+
+
+def test_ai_mode_requires_configuration(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    market = client.get(
+        "/api/market/candles?symbol=AIMISSING&timeframe=M5&source=demo&count=40"
+    ).json()
+    response = client.post(
+        "/api/analyze",
+        json={
+            "symbol": "AIMISSING",
+            "timeframe": "M5",
+            "source": "demo",
+            "use_ai": True,
+            "candles": market["candles"],
+        },
+    )
+    assert response.status_code == 503
+    assert "OPENAI_API_KEY" in response.json()["detail"]

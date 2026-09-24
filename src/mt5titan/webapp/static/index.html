@@ -37,6 +37,7 @@
         <select id="timeframe"><option>M1</option><option selected>M5</option><option>M15</option><option>H1</option></select>
         <select id="source"><option value="demo">Demo</option><option value="stored">Importado</option></select>
         <button class="primary" onclick="runMarketAnalysis()">Analisar</button>
+        <label class="badge"><input id="useAi" type="checkbox"> IA</label>
         <button onclick="addWatchlist()">+ Watchlist</button>
         <input id="marketFile" type="file" accept=".json,application/json" onchange="importMarketFile(this.files[0])">
       </div>
@@ -47,6 +48,7 @@
       </div>
       <h3>Sinais</h3>
       <div id="signals"></div>
+      <div id="aiPanel"></div>
     </section>
 
     <aside class="card side">
@@ -81,11 +83,13 @@ async function json(url, options={}) {
 }
 
 async function refresh() {
+  const health = await json('/api/health');
   const brokers = await json('/api/brokers');
   const paper = await json('/api/paper');
   document.getElementById('balance').textContent = '$ ' + paper.balance.toFixed(2);
   document.getElementById('brokerBadge').textContent =
-    'Paper: ON · Avalon: ' + (brokers.avalon.connected ? 'ON' : 'aguardando API oficial');
+    'Paper: ON · Avalon: ' + (brokers.avalon.connected ? 'ON' : 'aguardando API oficial') +
+    ' · IA: ' + (health.ai.configured ? 'configurada' : 'OFF');
   document.getElementById('paperTrades').innerHTML = renderPaper(paper);
   const history = await json('/api/analyses?limit=12');
   document.getElementById('analysisHistory').innerHTML = renderHistory(history.items);
@@ -117,6 +121,16 @@ async function resetPaper() {
   await json('/api/paper/reset', {method:'POST'});
   document.getElementById('paperMsg').textContent='Paper resetado.';
   await refresh();
+}
+
+function renderAi(ai) {
+  if (!ai || !ai.enabled) return '<div class="muted" style="margin-top:12px">IA não utilizada nesta análise.</div>';
+  const agents = ai.agents.map(a =>
+    '<tr><td>'+a.agent+'</td><td>'+a.verdict+'</td><td>'+Math.round(a.confidence*100)+'%</td><td>'+a.score+'</td></tr>'
+  ).join('');
+  return '<h3>AI Committee</h3><div class="badge">Committee: '+ai.committee.action+
+    ' · confiança '+Math.round(ai.committee.confidence*100)+'%</div>'+
+    '<table><tr><th>Agente</th><th>Veredito</th><th>Conf.</th><th>Score</th></tr>'+agents+'</table>';
 }
 
 function renderWatchlist(items) {
@@ -186,6 +200,7 @@ async function runMarketAnalysis() {
     symbol: market.symbol,
     timeframe: market.timeframe,
     source: market.source,
+    use_ai: document.getElementById('useAi').checked,
     candles: market.candles
   };
   const result = await json('/api/analyze', {
@@ -200,6 +215,7 @@ async function runMarketAnalysis() {
   lastDecision = result.decision.action;
   document.getElementById('signals').innerHTML = '<table><tr><th>Fonte</th><th>Ação</th><th>Confiança</th></tr>' +
     result.signals.map(s => '<tr><td>'+s.source+'</td><td>'+s.action+'</td><td>'+Math.round(s.confidence*100)+'%</td></tr>').join('') + '</table>';
+  document.getElementById('aiPanel').innerHTML = renderAi(result.ai);
   document.getElementById('report').textContent = JSON.stringify(result, null, 2);
   await refresh();
 }
