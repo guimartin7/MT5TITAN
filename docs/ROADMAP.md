@@ -42,6 +42,8 @@
 - [x] Macro agent (provider-agnostic)
 - [x] AI committee com pesos explícitos e veto
 - [x] Saída estruturada por schema
+- [x] Provider OpenAI isolado com chave/modelo por ambiente
+- [x] Replay persistente para evitar novas chamadas no benchmark
 - [ ] Pesos calibrados somente com dados de desenvolvimento/validação
 - [x] Comparação reproduzível Quant vs Quant+IA com replay de opiniões
 
