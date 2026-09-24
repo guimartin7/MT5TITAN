@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Literal
 from datetime import datetime, timezone
 
@@ -17,9 +18,11 @@ from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider
 from mt5titan.research import StrategySpec
 from mt5titan.risk import RiskEngine, RiskLimits, RiskState
 from mt5titan.storage import SQLiteStore
+from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, build_agent_context
+from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.4.0")
+app = FastAPI(title="MT5TITAN", version="0.5.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -41,6 +44,7 @@ class AnalyzeRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=32)
     timeframe: str = "M5"
     source: str = "external"
+    use_ai: bool = False
     candles: list[Candle] = Field(min_length=30)
 
 
@@ -84,6 +88,8 @@ def _analyze(payload: AnalyzeRequest) -> dict:
     regime = detect_regime(features)
     market = score_market(features, regime)
     signals = [strategy_signal(bars, spec, source=spec.name) for spec in _specs()]
+    quant_signals = list(signals)
+    ai_payload = None
 
     last = bars[-1]
     from mt5titan.domain import MarketSnapshot
@@ -96,6 +102,54 @@ def _analyze(payload: AnalyzeRequest) -> dict:
         regime=regime.regime,
         features=features.to_dict(),
     )
+
+    if payload.use_ai:
+        if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENAI_MODEL"):
+            raise RuntimeError(
+                "AI mode requires OPENAI_API_KEY and OPENAI_MODEL in the environment"
+            )
+
+        context = build_agent_context(
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+            timestamp=snapshot.timestamp,
+            features=features,
+            regime=regime,
+            market_score=market,
+            strategy_signals={signal.source: signal.score for signal in quant_signals},
+            event_risk={"blocked": False, "caution": False, "relevant_events": []},
+            portfolio={"allowed": True, "blockers": []},
+        )
+        provider = OpenAIProvider()
+        replay_store = OpinionReplayStore(Path("replays") / "web-opinions.jsonl")
+        experiment = TitanExperiment(provider, replay_store)
+        experiment_result = experiment.run_context(
+            key=f"{payload.symbol}:{payload.timeframe}:{snapshot.timestamp}",
+            context=context,
+            metadata={"source": payload.source},
+        )
+        ai_signal = AICommittee().aggregate(list(experiment_result.opinions))
+        signals.append(ai_signal)
+        ai_payload = {
+            "enabled": True,
+            "committee": {
+                "action": ai_signal.action.value,
+                "confidence": ai_signal.confidence,
+                "score": ai_signal.score,
+                "reasons": list(ai_signal.reasons),
+            },
+            "agents": [
+                {
+                    "agent": opinion.agent,
+                    "verdict": opinion.verdict.value,
+                    "confidence": opinion.confidence,
+                    "score": opinion.score,
+                    "reason_codes": list(opinion.reason_codes),
+                    "risk_flags": list(opinion.risk_flags),
+                }
+                for opinion in experiment_result.opinions
+            ],
+        }
 
     decision = DecisionEngine().decide(
         symbol=payload.symbol,
@@ -135,6 +189,7 @@ def _analyze(payload: AnalyzeRequest) -> dict:
             }
             for s in signals
         ],
+        "ai": ai_payload or {"enabled": False},
         "decision": {
             "id": decision.decision_id,
             "action": decision.action.value,
@@ -155,7 +210,16 @@ def _analyze(payload: AnalyzeRequest) -> dict:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.4.0", "persistence": "sqlite"}
+    ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
+    return {
+        "status": "ok",
+        "version": "0.5.0",
+        "persistence": "sqlite",
+        "ai": {
+            "provider": "openai",
+            "configured": ai_configured,
+        },
+    }
 
 
 @app.get("/api/brokers")
@@ -172,6 +236,8 @@ def analyze(payload: AnalyzeRequest):
         return report
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.get("/api/analyses")
