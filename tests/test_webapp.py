@@ -679,3 +679,37 @@ def test_scanner_adds_multi_timeframe_confirmation(monkeypatch):
         "timeframe_adjustment_pct" in item["recommendation"]
         for item in enriched
     )
+
+
+def test_analysis_persists_trade_desk_recommendation():
+    market = client.get(
+        "/api/market/candles?symbol=DESKTEST&timeframe=M5&source=demo&count=120"
+    ).json()
+    response = client.post(
+        "/api/analyze",
+        json={
+            "symbol": "DESKTEST",
+            "timeframe": "M5",
+            "source": "demo",
+            "use_ai": False,
+            "use_external_context": False,
+            "candles": market["candles"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    rec = body["recommendation"]
+    assert rec["action"] == body["decision"]["action"]
+    assert 0 <= rec["opportunity_score"] <= 100
+    assert rec["risk_level"] in {"LOW", "MEDIUM", "HIGH"}
+    assert rec["horizon"] == "10-30 min"
+
+    persisted = store.get_analysis(body["analysis_id"])
+    assert persisted["payload"]["recommendation"] == rec
+
+
+def test_dashboard_contains_trade_desk_panel():
+    html = client.get("/").text
+    assert 'id="tradeDesk"' in html
+    assert "Análise probabilística; capital e execução continuam sob seu controle." in html

@@ -23,7 +23,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.13.0")
+app = FastAPI(title="MT5TITAN", version="0.14.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -313,7 +313,7 @@ def _analyze(payload: AnalyzeRequest) -> dict:
         RiskLimits(min_confidence=0.55)
     ).evaluate(decision, snapshot, RiskState())
 
-    return {
+    report = {
         "symbol": payload.symbol,
         "timeframe": payload.timeframe,
         "source": payload.source,
@@ -365,6 +365,8 @@ def _analyze(payload: AnalyzeRequest) -> dict:
             "paper_enabled": True,
         },
     }
+    report["recommendation"] = build_trade_recommendation(report).to_dict()
+    return report
 
 
 @app.get("/api/health")
@@ -372,7 +374,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.13.0",
+        "version": "0.14.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -398,7 +400,7 @@ def diagnostics():
         db_ok = False
 
     return {
-        "app": {"status": "ok", "version": "0.11.0"},
+        "app": {"status": "ok", "version": "0.14.0"},
         "database": {"status": "ok" if db_ok else "error"},
         "quant": {"status": "ok"},
         "ai": {

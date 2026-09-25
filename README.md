@@ -348,3 +348,27 @@ Quant
 
 Tudo permanece auditável no dashboard com status e ajuste MTF exibidos por
 oportunidade.
+
+
+## Trade Desk
+
+A versão 0.14.0 transforma cada análise persistida em uma recomendação estruturada
+exibida diretamente no dashboard.
+
+O painel mostra:
+
+- BUY / SELL / HOLD;
+- opportunity score;
+- confiança da decisão;
+- nível de risco;
+- zona indicativa de entrada;
+- preço de invalidação;
+- horizonte;
+- risco contextual News/Macro;
+- ajuste multi-timeframe;
+- motor usado (Quant, fallback Quant ou Quant + AI Committee);
+- motivos auditáveis.
+
+A recomendação é persistida dentro do payload da análise e nunca altera o princípio
+de controle do capital: a aplicação produz inteligência probabilística; stake e
+execução permanecem sob controle do usuário e do Risk Engine.
