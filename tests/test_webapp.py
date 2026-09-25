@@ -713,3 +713,17 @@ def test_dashboard_contains_trade_desk_panel():
     html = client.get("/").text
     assert 'id="tradeDesk"' in html
     assert "Análise probabilística; capital e execução continuam sob seu controle." in html
+
+
+def test_calibration_endpoint_is_observational_only():
+    response = client.get("/api/calibration")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["automatic_application"] is False
+    assert body["minimum_samples_per_agent"] == 20
+
+
+def test_dashboard_contains_calibration_panel():
+    html = client.get("/").text
+    assert 'id="calibrationPanel"' in html
+    assert "Calibration Advisor" in html

@@ -636,3 +636,34 @@ class SQLiteStore:
             "by_regime": by_regime,
             "agents": agent_totals,
         }
+
+
+    def agent_calibration_samples(self) -> dict[str, dict[str, dict]]:
+        samples: dict[str, dict[str, dict]] = {}
+        for outcome in self.recent_outcomes(500):
+            if outcome["market_direction"] not in {"BUY", "SELL"}:
+                continue
+
+            analysis = self.get_analysis(int(outcome["analysis_id"]))
+            payload = analysis["payload"]
+            ai = payload.get("ai") or {}
+            regime = str(analysis["regime"])
+            regime_bucket = samples.setdefault(regime, {})
+
+            for opinion in ai.get("agents") or []:
+                agent = str(opinion.get("agent") or "")
+                if agent not in {"technical", "news", "macro"}:
+                    continue
+                verdict = str(opinion.get("verdict") or "HOLD")
+                if verdict not in {"BUY", "SELL"}:
+                    continue
+
+                bucket = regime_bucket.setdefault(
+                    agent,
+                    {"directional_calls": 0, "correct": 0},
+                )
+                bucket["directional_calls"] += 1
+                if verdict == outcome["market_direction"]:
+                    bucket["correct"] += 1
+
+        return samples

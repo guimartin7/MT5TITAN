@@ -372,3 +372,24 @@ O painel mostra:
 A recomendação é persistida dentro do payload da análise e nunca altera o princípio
 de controle do capital: a aplicação produz inteligência probabilística; stake e
 execução permanecem sob controle do usuário e do Risk Engine.
+
+
+## Calibration Advisor
+
+A versão 0.15.0 adiciona calibração observacional por regime para os agentes
+Technical, News e Macro.
+
+O sistema acompanha acurácia direcional rotulada pelos outcomes e só produz uma
+sugestão de pesos quando **cada agente** possui pelo menos 20 chamadas direcionais
+avaliadas no mesmo regime.
+
+Características:
+
+- prior conservador de 50% com shrinkage;
+- mudança máxima limitada a aproximadamente 10 pontos percentuais por agente;
+- pesos sugeridos normalizados para 100%;
+- nenhuma aplicação automática;
+- calibração separada por regime de mercado.
+
+Isso evita o erro de reajustar o Committee com poucas amostras ou uma sequência
+curta de sorte.
