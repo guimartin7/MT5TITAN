@@ -16,6 +16,8 @@ class TradeRecommendation:
     horizon: str
     context_risk: str
     context_penalty_pct: float
+    timeframe_status: str
+    timeframe_adjustment_pct: float
     reasons: tuple[str, ...]
 
     def to_dict(self) -> dict:
@@ -83,6 +85,15 @@ def build_trade_recommendation(report: dict) -> TradeRecommendation:
     context_penalty = min(context_penalty, 30.0)
     total *= 1.0 - context_penalty / 100.0
 
+    timeframe = report.get("timeframe_confirmation") or {}
+    timeframe_status = str(timeframe.get("status") or "NOT_EVALUATED")
+    try:
+        timeframe_adjustment = float(timeframe.get("adjustment_pct") or 0.0)
+    except (TypeError, ValueError):
+        timeframe_adjustment = 0.0
+    timeframe_adjustment = max(-15.0, min(10.0, timeframe_adjustment))
+    total *= 1.0 + timeframe_adjustment / 100.0
+
     if action == "HOLD":
         total *= 0.35
     if not risk_allowed:
@@ -120,6 +131,9 @@ def build_trade_recommendation(report: dict) -> TradeRecommendation:
     if context_penalty:
         reasons.append(f"CONTEXT_RISK:{context_risk}")
         reasons.append(f"CONTEXT_PENALTY_PCT:{context_penalty:.1f}")
+    if timeframe_status != "NOT_EVALUATED":
+        reasons.append(f"MTF:{timeframe_status}")
+        reasons.append(f"MTF_ADJUSTMENT_PCT:{timeframe_adjustment:.1f}")
     if report.get("ai", {}).get("enabled"):
         committee = report["ai"].get("committee", {})
         reasons.append(f"AI_COMMITTEE:{committee.get('action', 'HOLD')}")
@@ -137,5 +151,7 @@ def build_trade_recommendation(report: dict) -> TradeRecommendation:
         horizon=_horizon(str(report["timeframe"])),
         context_risk=context_risk,
         context_penalty_pct=round(context_penalty, 2),
+        timeframe_status=timeframe_status,
+        timeframe_adjustment_pct=round(timeframe_adjustment, 2),
         reasons=tuple(reasons),
     )

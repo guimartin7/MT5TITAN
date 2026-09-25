@@ -315,3 +315,36 @@ análise → decisão → recheck de risco → trade → settlement
 
 Saldo e lifecycle do trade são atualizados em transação SQLite única. O botão
 **Reset paper** agora restaura a conta e limpa operações paper antigas.
+
+
+## Confirmação multi-timeframe
+
+A versão 0.13.0 adiciona confirmação de timeframe superior nos Top 2 candidatos
+do scanner sem consumir chamadas adicionais da fonte de mercado.
+
+Os candles do timeframe base são reagregados localmente:
+
+```text
+M1  → M5
+M5  → M15
+M15 → H1
+```
+
+A confirmação superior não cria nem inverte BUY/SELL:
+
+- **ALIGNED**: bônus de até +10% no opportunity score;
+- **CONFLICT**: penalidade de até -15%;
+- **NEUTRAL**: sem ajuste.
+
+O ranking passa a combinar:
+
+```text
+Quant
++ regime
++ contexto News/Macro
++ confirmação multi-timeframe
++ Deep AI opcional
+```
+
+Tudo permanece auditável no dashboard com status e ajuste MTF exibidos por
+oportunidade.
