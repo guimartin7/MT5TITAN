@@ -255,7 +255,12 @@ def test_scanner_ranks_seeded_watchlist(monkeypatch):
     before = len(store.recent_analyses(200))
     response = client.post(
         "/api/scanner",
-        json={"deep_ai": False, "ai_top_n": 3, "candle_count": 140},
+        json={
+            "deep_ai": False,
+            "ai_top_n": 3,
+            "use_context": False,
+            "candle_count": 140,
+        },
     )
     assert response.status_code == 200
     body = response.json()
@@ -445,3 +450,54 @@ def test_context_endpoint_degrades_gracefully(monkeypatch):
     body = response.json()
     assert body["news"]["available"] is False
     assert body["macro"]["available"] is False
+
+
+def test_scanner_enriches_top_candidates_with_context(monkeypatch):
+    from mt5titan.webapp import main as webmain
+
+    class FakeNews:
+        def context(self, **kwargs):
+            symbol = kwargs["symbol"]
+            return {
+                "provider": "gdelt",
+                "available": True,
+                "risk_level": "HIGH" if symbol == "EURUSD" else "LOW",
+                "high_impact_hits": 4 if symbol == "EURUSD" else 0,
+                "articles": [],
+            }
+
+    class FakeMacro:
+        def context(self):
+            return {
+                "provider": "fred",
+                "available": True,
+                "series": {
+                    "vix": {
+                        "available": True,
+                        "value": 18.0,
+                        "change": 0.0,
+                        "date": "2026-09-24",
+                    }
+                },
+            }
+
+    monkeypatch.setattr(webmain, "gdelt_news", FakeNews())
+    monkeypatch.setattr(webmain, "fred_macro", FakeMacro())
+    client.post("/api/watchlist/demo-seed")
+
+    response = client.post(
+        "/api/scanner",
+        json={
+            "deep_ai": False,
+            "use_context": True,
+            "context_top_n": 5,
+            "candle_count": 140,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "QUANT_CONTEXT_SCAN"
+    assert any(item.get("context_enriched") for item in body["ranked"])
+    enriched = [item for item in body["ranked"] if item.get("context_enriched")]
+    assert all("external_context" in item for item in enriched)
+    assert all("context_penalty_pct" in item["recommendation"] for item in enriched)
