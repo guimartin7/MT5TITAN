@@ -107,6 +107,7 @@
         <button onclick="evaluateLastDecision()">Avaliar última decisão</button>
       </div>
       <div id="outcomeStats" style="margin-top:14px"></div>
+      <div id="calibrationPanel" style="margin-top:18px"></div>
     </section>
 
     <section class="card full">
@@ -163,6 +164,8 @@ async function refresh() {
   document.getElementById('watchlist').innerHTML = renderWatchlist(watch.items);
   const stats = await json('/api/outcomes/stats');
   document.getElementById('outcomeStats').innerHTML = renderOutcomeStats(stats);
+  const calibration = await json('/api/calibration');
+  document.getElementById('calibrationPanel').innerHTML = renderCalibration(calibration);
 }
 
 function renderScanner(items) {
@@ -275,6 +278,34 @@ async function resetPaper() {
   await json('/api/paper/reset', {method:'POST'});
   document.getElementById('paperMsg').textContent='Paper resetado.';
   await refresh();
+}
+
+function renderCalibration(data) {
+  const regimes = Object.entries(data.regimes || {});
+  if (!regimes.length) {
+    return '<h3>Calibration Advisor</h3><div class="muted">Sem amostra de IA avaliada ainda. Aplicação automática: OFF.</div>';
+  }
+
+  const rows = regimes.map(([regime, row]) => {
+    const tech = row.evidence.technical;
+    const news = row.evidence.news;
+    const macro = row.evidence.macro;
+    const suggested = row.suggested_weights
+      ? 'T '+Math.round(row.suggested_weights.technical*100)+'% · N '+Math.round(row.suggested_weights.news*100)+'% · M '+Math.round(row.suggested_weights.macro*100)+'%'
+      : 'Aguardando amostra';
+    return '<tr>'+
+      '<td>'+regime+'</td>'+
+      '<td>'+(row.ready ? 'PRONTO' : 'NÃO PRONTO')+'</td>'+
+      '<td>'+tech.directional_calls+' / '+(tech.accuracy_pct ?? '—')+'%</td>'+
+      '<td>'+news.directional_calls+' / '+(news.accuracy_pct ?? '—')+'%</td>'+
+      '<td>'+macro.directional_calls+' / '+(macro.accuracy_pct ?? '—')+'%</td>'+
+      '<td>'+suggested+'</td>'+
+    '</tr>';
+  }).join('');
+
+  return '<h3>Calibration Advisor</h3>'+
+    '<div class="muted">Mínimo: '+data.minimum_samples_per_agent+' chamadas direcionais por agente/regime. Aplicação automática: OFF.</div>'+
+    '<table style="margin-top:10px"><tr><th>Regime</th><th>Status</th><th>Technical</th><th>News</th><th>Macro</th><th>Pesos sugeridos</th></tr>'+rows+'</table>';
 }
 
 function renderOutcomeStats(stats) {
