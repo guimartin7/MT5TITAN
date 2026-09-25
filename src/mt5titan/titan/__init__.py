@@ -2,6 +2,7 @@
 
 from .agents import MacroAgent, NewsAgent, TechnicalAgent
 from .benchmark import PromotionPolicy, compare_quant_vs_ai
+from .calibration import CalibrationPolicy, build_calibration_advice
 from .committee import AICommittee, CommitteePolicy
 from .context import build_agent_context
 from .experiment import ExperimentResult, TitanExperiment
@@ -15,6 +16,7 @@ __all__ = [
     "AgentOpinion",
     "AgentVerdict",
     "CommitteePolicy",
+    "CalibrationPolicy",
     "ExperimentResult",
     "MacroAgent",
     "ModelProvider",
@@ -24,5 +26,6 @@ __all__ = [
     "TechnicalAgent",
     "TitanExperiment",
     "build_agent_context",
+    "build_calibration_advice",
     "compare_quant_vs_ai",
 ]
