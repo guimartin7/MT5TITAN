@@ -16,13 +16,17 @@ __all__ = [
     "ExposurePolicy",
     "FeatureSet",
     "TradeRecommendation",
+    "TimeframeConfirmation",
     "MarketScore",
     "RegimeAssessment",
     "build_features",
     "build_trade_recommendation",
+    "build_timeframe_confirmation",
     "classify_event_risk",
     "close_correlation",
     "detect_regime",
     "evaluate_portfolio_exposure",
     "score_market",
 ]
+
+from .multitimeframe import TimeframeConfirmation, build_timeframe_confirmation
