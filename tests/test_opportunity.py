@@ -42,3 +42,28 @@ def test_hold_and_blocked_are_penalized():
     blocked = build_trade_recommendation(report("BUY", False))
     assert hold.opportunity_score < good.opportunity_score
     assert blocked.opportunity_score < good.opportunity_score
+
+
+def test_high_external_risk_penalizes_opportunity():
+    baseline = report("BUY")
+    risky = report("BUY")
+    risky["external_context"] = {
+        "news": {
+            "available": True,
+            "risk_level": "HIGH",
+        },
+        "macro": {
+            "available": True,
+            "series": {
+                "vix": {"available": True, "value": 35.0}
+            },
+        },
+    }
+
+    clean = build_trade_recommendation(baseline)
+    penalized = build_trade_recommendation(risky)
+
+    assert penalized.opportunity_score < clean.opportunity_score
+    assert penalized.context_risk == "HIGH"
+    assert penalized.context_penalty_pct == 30.0
+    assert penalized.action == clean.action

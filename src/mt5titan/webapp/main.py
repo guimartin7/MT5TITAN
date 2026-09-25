@@ -23,7 +23,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.10.0")
+app = FastAPI(title="MT5TITAN", version="0.11.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -88,6 +88,8 @@ class OutcomeRequest(BaseModel):
 class ScannerRequest(BaseModel):
     deep_ai: bool = False
     ai_top_n: int = Field(default=3, ge=1, le=5)
+    use_context: bool = True
+    context_top_n: int = Field(default=5, ge=1, le=10)
     candle_count: int = Field(default=140, ge=30, le=500)
 
 
@@ -289,7 +291,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.10.0",
+        "version": "0.11.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -315,7 +317,7 @@ def diagnostics():
         db_ok = False
 
     return {
-        "app": {"status": "ok", "version": "0.8.0"},
+        "app": {"status": "ok", "version": "0.11.0"},
         "database": {"status": "ok" if db_ok else "error"},
         "quant": {"status": "ok"},
         "ai": {
@@ -414,6 +416,7 @@ def scan_opportunities(payload: ScannerRequest):
                 timeframe=batch.timeframe,
                 source=batch.source,
                 use_ai=False,
+                use_external_context=False,
                 candles=[Candle(**row) for row in batch.candles],
             )
             report = _analyze(request)
@@ -443,6 +446,33 @@ def scan_opportunities(payload: ScannerRequest):
         reverse=True,
     )
 
+    if payload.use_context:
+        for candidate in candidates[: payload.context_top_n]:
+            request = AnalyzeRequest(
+                symbol=candidate["symbol"],
+                timeframe=candidate["timeframe"],
+                source=candidate["source"],
+                use_ai=False,
+                use_external_context=True,
+                candles=[Candle(**row) for row in candidate["_candles"]],
+            )
+            report = _analyze(request)
+            recommendation = build_trade_recommendation(report)
+            candidate.update({
+                "context_enriched": True,
+                "recommendation": recommendation.to_dict(),
+                "decision": report["decision"],
+                "regime": report["regime"],
+                "market_score": report["market_score"],
+                "risk": report["risk"],
+                "external_context": report["external_context"],
+            })
+
+        candidates.sort(
+            key=lambda row: row["recommendation"]["opportunity_score"],
+            reverse=True,
+        )
+
     if payload.deep_ai:
         eligible = [
             row
@@ -456,6 +486,7 @@ def scan_opportunities(payload: ScannerRequest):
                 timeframe=candidate["timeframe"],
                 source=candidate["source"],
                 use_ai=True,
+                use_external_context=payload.use_context,
                 candles=[Candle(**row) for row in candidate["_candles"]],
             )
             report = _analyze(request)
@@ -468,6 +499,8 @@ def scan_opportunities(payload: ScannerRequest):
                 "market_score": report["market_score"],
                 "risk": report["risk"],
                 "ai": report["ai"],
+                "external_context": report["external_context"],
+                "context_enriched": payload.use_context,
             })
 
         candidates.sort(
@@ -479,7 +512,15 @@ def scan_opportunities(payload: ScannerRequest):
         candidate.pop("_candles", None)
 
     return {
-        "mode": "QUANT_PLUS_TOP_AI" if payload.deep_ai else "QUANT_SCAN",
+        "mode": (
+            "QUANT_CONTEXT_TOP_AI"
+            if payload.deep_ai and payload.use_context
+            else "QUANT_PLUS_TOP_AI"
+            if payload.deep_ai
+            else "QUANT_CONTEXT_SCAN"
+            if payload.use_context
+            else "QUANT_SCAN"
+        ),
         "watchlist_size": len(watch_items),
         "ranked": candidates,
         "skipped": skipped,

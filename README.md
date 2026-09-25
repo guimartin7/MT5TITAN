@@ -233,3 +233,39 @@ continua funcionando.
 
 As headlines são usadas como contexto/risk awareness, não como ordem automática
 nem como prova de direção do mercado. O FRED também é contexto, não gatilho isolado.
+
+
+## Scanner com contexto de risco
+
+A versão 0.11.0 usa um pipeline em duas passagens:
+
+```text
+Watchlist
+  ↓
+Quant em todos os ativos
+  ↓
+Ranking preliminar
+  ↓
+News/Macro apenas nos Top 5
+  ↓
+Penalidade de risco contextual
+  ↓
+Ranking final
+  ↓
+Deep AI opcional nos Top 3
+```
+
+O contexto externo **não inverte a direção** BUY/SELL determinada pelo conjunto
+Quant. Ele apenas reduz o `opportunity_score` e/ou eleva o nível de risco quando
+há sinais de risco contextual.
+
+Penalidades atuais:
+
+- News risk MEDIUM: -8%;
+- News risk HIGH: -20%;
+- VIX >= 20: -5%;
+- VIX >= 30: -12%;
+- penalidade total limitada a 30%.
+
+O dashboard mostra a penalidade aplicada e o nível de risco contextual para que o
+ranking permaneça auditável.

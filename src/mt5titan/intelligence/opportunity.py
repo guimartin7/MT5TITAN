@@ -14,6 +14,8 @@ class TradeRecommendation:
     entry_zone_high: float
     invalidation_price: float | None
     horizon: str
+    context_risk: str
+    context_penalty_pct: float
     reasons: tuple[str, ...]
 
     def to_dict(self) -> dict:
@@ -50,13 +52,44 @@ def build_trade_recommendation(report: dict) -> TradeRecommendation:
         + regime_confidence * 0.10
     )
 
+    external = report.get("external_context") or {}
+    news = external.get("news") or {}
+    macro = external.get("macro") or {}
+    context_penalty = 0.0
+    context_risk = "LOW"
+
+    news_risk = str(news.get("risk_level") or "").upper()
+    if news.get("available") and news_risk == "HIGH":
+        context_penalty += 20.0
+        context_risk = "HIGH"
+    elif news.get("available") and news_risk == "MEDIUM":
+        context_penalty += 8.0
+        context_risk = "MEDIUM"
+
+    vix = (macro.get("series") or {}).get("vix") or {}
+    if vix.get("available"):
+        try:
+            vix_value = float(vix["value"])
+        except (KeyError, TypeError, ValueError):
+            vix_value = 0.0
+        if vix_value >= 30.0:
+            context_penalty += 12.0
+            context_risk = "HIGH"
+        elif vix_value >= 20.0:
+            context_penalty += 5.0
+            if context_risk == "LOW":
+                context_risk = "MEDIUM"
+
+    context_penalty = min(context_penalty, 30.0)
+    total *= 1.0 - context_penalty / 100.0
+
     if action == "HOLD":
         total *= 0.35
     if not risk_allowed:
         total *= 0.25
 
     regime = str(report["regime"]["value"])
-    if regime in {
+    if context_risk == "HIGH" or regime in {
         MarketRegime.HIGH_VOLATILITY.value,
         MarketRegime.UNCERTAIN.value,
         MarketRegime.EVENT.value,
@@ -84,6 +117,9 @@ def build_trade_recommendation(report: dict) -> TradeRecommendation:
         f"MARKET_SCORE:{market_score:.2f}",
         f"DECISION_CONFIDENCE:{confidence:.1f}",
     ]
+    if context_penalty:
+        reasons.append(f"CONTEXT_RISK:{context_risk}")
+        reasons.append(f"CONTEXT_PENALTY_PCT:{context_penalty:.1f}")
     if report.get("ai", {}).get("enabled"):
         committee = report["ai"].get("committee", {})
         reasons.append(f"AI_COMMITTEE:{committee.get('action', 'HOLD')}")
@@ -99,5 +135,7 @@ def build_trade_recommendation(report: dict) -> TradeRecommendation:
         entry_zone_high=round(entry + zone_half_width, 6),
         invalidation_price=None if invalidation is None else round(invalidation, 6),
         horizon=_horizon(str(report["timeframe"])),
+        context_risk=context_risk,
+        context_penalty_pct=round(context_penalty, 2),
         reasons=tuple(reasons),
     )
