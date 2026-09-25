@@ -671,6 +671,26 @@ def outcome_stats():
     return store.outcome_statistics()
 
 
+@app.get("/api/risk/status")
+def risk_status(symbol: str | None = None):
+    limits = _execution_risk_limits()
+    state = store.paper_risk_snapshot(
+        initial_balance=paper.initial_balance,
+        symbol=symbol,
+    )
+    return {
+        "limits": {
+            "max_daily_loss_pct": limits.max_daily_loss_pct,
+            "max_drawdown_pct": limits.max_drawdown_pct,
+            "max_entries_per_day": limits.max_entries_per_day,
+            "max_open_trades": limits.max_open_trades,
+            "max_stake_pct": limits.max_stake_pct,
+            "min_confidence": limits.min_confidence,
+        },
+        "state": state,
+    }
+
+
 @app.get("/api/paper")
 def paper_status():
     return paper.snapshot()
