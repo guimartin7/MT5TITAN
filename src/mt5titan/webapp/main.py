@@ -628,6 +628,10 @@ def scan_opportunities(payload: ScannerRequest):
                 candles=[Candle(**row) for row in candidate["_candles"]],
             )
             report = _analyze(request)
+            if candidate.get("timeframe_confirmation", {}).get("status") in {
+                "ALIGNED", "CONFLICT", "NEUTRAL"
+            }:
+                report["timeframe_confirmation"] = candidate["timeframe_confirmation"]
             recommendation = build_trade_recommendation(report)
             candidate.update({
                 "deep_ai": True,
