@@ -12,6 +12,8 @@ class RiskLimits:
     max_daily_loss_pct: float = 1.0
     max_drawdown_pct: float = 2.0
     max_entries_per_day: int = 5
+    max_open_trades: int = 3
+    max_stake_pct: float = 10.0
     max_spread: float | None = None
     min_confidence: float = 0.0
 
@@ -21,6 +23,8 @@ class RiskState:
     daily_return_pct: float = 0.0
     drawdown_pct: float = 0.0
     entries_today: int = 0
+    open_trades: int = 0
+    stake_pct_of_balance: float = 0.0
     kill_switch: bool = False
     feed_healthy: bool = True
     conflicting_exposure: bool = False
@@ -51,6 +55,10 @@ class RiskEngine:
             reasons.append("drawdown_limit")
         if state.entries_today >= self.limits.max_entries_per_day:
             reasons.append("daily_entry_limit")
+        if state.open_trades >= self.limits.max_open_trades:
+            reasons.append("max_open_trades")
+        if state.stake_pct_of_balance > self.limits.max_stake_pct:
+            reasons.append("stake_above_limit")
         if decision.confidence < self.limits.min_confidence:
             reasons.append("confidence_below_minimum")
         if self.limits.max_spread is not None and snapshot.spread > self.limits.max_spread:
