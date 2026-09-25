@@ -31,7 +31,15 @@ class PaperTradingBroker:
             "open_trades": len(snapshot["open_trades"]),
         }
 
-    def place_order(self, *, symbol: str, side: str, stake: float, price: float) -> dict:
+    def place_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        stake: float,
+        price: float,
+        analysis_id: int | None = None,
+    ) -> dict:
         side = side.upper()
         if side not in {"BUY", "SELL"}:
             raise ValueError("side must be BUY or SELL")
@@ -43,15 +51,15 @@ class PaperTradingBroker:
             raise ValueError("insufficient paper balance")
 
         now = datetime.now(timezone.utc).isoformat()
-        trade = self.store.create_paper_trade(
+        return self.store.open_paper_trade_atomic(
+            analysis_id=analysis_id,
             symbol=symbol,
             side=side,
             stake=float(stake),
             entry_price=float(price),
             created_at_utc=now,
+            initial_balance=self.initial_balance,
         )
-        self._set_balance(self.balance - float(stake))
-        return trade
 
     def settle(self, *, trade_id: int, exit_price: float, payout_ratio: float = 0.82) -> dict:
         if exit_price <= 0:
@@ -64,22 +72,22 @@ class PaperTradingBroker:
         won = exit_price > trade["entry_price"] if trade["side"] == "BUY" else exit_price < trade["entry_price"]
         returned = trade["stake"] * (1.0 + payout_ratio) if won else 0.0
         pnl = returned - trade["stake"]
-        self._set_balance(self.balance + returned)
-
-        return self.store.settle_paper_trade(
+        return self.store.settle_paper_trade_atomic(
             trade_id=trade_id,
             exit_price=float(exit_price),
             payout_ratio=float(payout_ratio),
             won=won,
+            returned=returned,
             pnl=round(pnl, 2),
             settled_at_utc=datetime.now(timezone.utc).isoformat(),
+            initial_balance=self.initial_balance,
         )
 
     def reset(self, balance: float | None = None) -> dict:
         value = self.initial_balance if balance is None else float(balance)
         if value <= 0:
             raise ValueError("balance must be positive")
-        self._set_balance(value)
+        self.store.reset_paper_account(balance=value)
         return self.snapshot()
 
     def snapshot(self) -> dict:
