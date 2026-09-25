@@ -627,3 +627,55 @@ def test_risk_status_endpoint_exposes_limits_and_state():
     assert body["limits"]["max_open_trades"] == 3
     assert body["limits"]["max_stake_pct"] == 10.0
     assert body["state"]["open_trades"] == 0
+
+
+def test_scanner_adds_multi_timeframe_confirmation(monkeypatch):
+    from mt5titan.webapp import main as webmain
+
+    class NoNews:
+        def context(self, **kwargs):
+            return {
+                "provider": "gdelt",
+                "available": False,
+                "risk_level": "LOW",
+                "high_impact_hits": 0,
+                "articles": [],
+            }
+
+    class NoMacro:
+        def context(self):
+            return {
+                "provider": "fred",
+                "available": False,
+                "series": {},
+            }
+
+    monkeypatch.setattr(webmain, "gdelt_news", NoNews())
+    monkeypatch.setattr(webmain, "fred_macro", NoMacro())
+    client.post("/api/watchlist/demo-seed")
+
+    response = client.post(
+        "/api/scanner",
+        json={
+            "deep_ai": False,
+            "use_context": False,
+            "use_mtf": True,
+            "mtf_top_n": 2,
+            "candle_count": 180,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mtf_enabled"] is True
+    enriched = [item for item in body["ranked"] if item.get("mtf_enriched")]
+    assert enriched
+    assert len(enriched) <= 2
+    assert all(
+        item["timeframe_confirmation"]["status"] in {"ALIGNED", "CONFLICT", "NEUTRAL"}
+        for item in enriched
+    )
+    assert all(
+        "timeframe_adjustment_pct" in item["recommendation"]
+        for item in enriched
+    )
