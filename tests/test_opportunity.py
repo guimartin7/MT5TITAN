@@ -67,3 +67,28 @@ def test_high_external_risk_penalizes_opportunity():
     assert penalized.context_risk == "HIGH"
     assert penalized.context_penalty_pct == 30.0
     assert penalized.action == clean.action
+
+
+def test_mtf_confirmation_adjusts_opportunity_without_changing_direction():
+    baseline = report("BUY")
+    aligned = report("BUY")
+    aligned["timeframe_confirmation"] = {
+        "status": "ALIGNED",
+        "adjustment_pct": 8.0,
+    }
+    conflict = report("BUY")
+    conflict["timeframe_confirmation"] = {
+        "status": "CONFLICT",
+        "adjustment_pct": -12.0,
+    }
+
+    base_rec = build_trade_recommendation(baseline)
+    aligned_rec = build_trade_recommendation(aligned)
+    conflict_rec = build_trade_recommendation(conflict)
+
+    assert aligned_rec.opportunity_score > base_rec.opportunity_score
+    assert conflict_rec.opportunity_score < base_rec.opportunity_score
+    assert aligned_rec.action == "BUY"
+    assert conflict_rec.action == "BUY"
+    assert aligned_rec.timeframe_status == "ALIGNED"
+    assert conflict_rec.timeframe_status == "CONFLICT"
