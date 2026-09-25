@@ -501,3 +501,129 @@ def test_scanner_enriches_top_candidates_with_context(monkeypatch):
     enriched = [item for item in body["ranked"] if item.get("context_enriched")]
     assert all("external_context" in item for item in enriched)
     assert all("context_penalty_pct" in item["recommendation"] for item in enriched)
+
+
+
+def _approved_analysis_for_risk(symbol: str, decision_id: str):
+    return store.save_analysis(
+        {
+            "symbol": symbol,
+            "timeframe": "M5",
+            "source": "demo",
+            "market_timestamp": 1_700_000_000,
+            "reference_price": 100.0,
+            "features": {},
+            "regime": {"value": "TRENDING"},
+            "market_score": {"total": 80.0},
+            "decision": {
+                "id": decision_id,
+                "action": "BUY",
+                "confidence": 0.8,
+                "score": 0.7,
+            },
+            "risk": {"allowed": True},
+            "ai": {"enabled": False},
+        },
+        datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def test_execution_risk_blocks_duplicate_symbol_exposure():
+    client.post("/api/paper/reset")
+    first_id = _approved_analysis_for_risk("RISKPAIR", "risk-first")
+    first = client.post(
+        "/api/paper/order",
+        json={
+            "analysis_id": first_id,
+            "symbol": "RISKPAIR",
+            "side": "BUY",
+            "stake": 10,
+            "price": 100,
+        },
+    )
+    assert first.status_code == 200
+    assert first.json()["analysis_id"] == first_id
+    assert first.json()["risk_recheck"]["allowed"] is True
+
+    second_id = _approved_analysis_for_risk("RISKPAIR", "risk-second")
+    blocked = client.post(
+        "/api/paper/order",
+        json={
+            "analysis_id": second_id,
+            "symbol": "RISKPAIR",
+            "side": "BUY",
+            "stake": 10,
+            "price": 100,
+        },
+    )
+
+    assert blocked.status_code == 422
+    assert "conflicting_exposure" in blocked.json()["detail"]
+
+
+def test_execution_risk_blocks_excessive_stake():
+    client.post("/api/paper/reset")
+    analysis_id = _approved_analysis_for_risk("STAKEPAIR", "risk-stake")
+
+    blocked = client.post(
+        "/api/paper/order",
+        json={
+            "analysis_id": analysis_id,
+            "symbol": "STAKEPAIR",
+            "side": "BUY",
+            "stake": 2000,
+            "price": 100,
+        },
+    )
+
+    assert blocked.status_code == 422
+    assert "stake_above_limit" in blocked.json()["detail"]
+
+
+def test_execution_risk_blocks_after_daily_loss_limit():
+    client.post("/api/paper/reset")
+    first_id = _approved_analysis_for_risk("LOSSPAIR", "risk-loss")
+    opened = client.post(
+        "/api/paper/order",
+        json={
+            "analysis_id": first_id,
+            "symbol": "LOSSPAIR",
+            "side": "BUY",
+            "stake": 100,
+            "price": 100,
+        },
+    )
+    assert opened.status_code == 200
+
+    settled = client.post(
+        "/api/paper/settle",
+        json={
+            "trade_id": opened.json()["trade_id"],
+            "exit_price": 99,
+            "payout_ratio": 0.82,
+        },
+    )
+    assert settled.status_code == 200
+
+    next_id = _approved_analysis_for_risk("OTHERPAIR", "risk-after-loss")
+    blocked = client.post(
+        "/api/paper/order",
+        json={
+            "analysis_id": next_id,
+            "symbol": "OTHERPAIR",
+            "side": "BUY",
+            "stake": 10,
+            "price": 100,
+        },
+    )
+
+    assert blocked.status_code == 422
+    assert "daily_loss_limit" in blocked.json()["detail"]
+
+
+def test_risk_status_endpoint_exposes_limits_and_state():
+    client.post("/api/paper/reset")
+    body = client.get("/api/risk/status?symbol=EURUSD").json()
+    assert body["limits"]["max_open_trades"] == 3
+    assert body["limits"]["max_stake_pct"] == 10.0
+    assert body["state"]["open_trades"] == 0
