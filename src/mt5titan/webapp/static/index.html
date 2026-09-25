@@ -38,6 +38,7 @@
         </div>
         <div class="row">
           <button onclick="seedDemoWatchlist()">Popular demo</button>
+          <label class="badge"><input id="scannerContext" type="checkbox" checked> News/Macro Top 5</label>
           <label class="badge"><input id="scannerAi" type="checkbox"> Deep AI nos Top 3</label>
           <button class="primary" onclick="runScanner()">Escanear watchlist</button>
         </div>
@@ -174,11 +175,13 @@ function renderScanner(items) {
       '<td>'+rec.entry_zone_low+' → '+rec.entry_zone_high+'</td>'+
       '<td>'+invalidation+'</td>'+
       '<td>'+rec.horizon+'</td>'+
-      '<td>'+(item.deep_ai ? 'AI' : 'Quant')+'</td>'+
+      '<td>'+rec.context_risk+'</td>'+
+      '<td>'+(rec.context_penalty_pct ? '-'+rec.context_penalty_pct+'%' : '—')+'</td>'+
+      '<td>'+(item.deep_ai ? 'AI' : item.context_enriched ? 'Quant+Contexto' : 'Quant')+'</td>'+
       '<td><button onclick="openOpportunity(\''+item.symbol+'\',\''+item.timeframe+'\',\''+item.source+'\','+item.deep_ai+')">Analisar</button></td>'+
     '</tr>';
   }).join('');
-  return '<table><tr><th>#</th><th>Ativo</th><th>Ação</th><th>Score</th><th>Conf.</th><th>Risco</th><th>Regime</th><th>Zona entrada</th><th>Invalidação</th><th>Horizonte</th><th>Motor</th><th></th></tr>'+rows+'</table>';
+  return '<table><tr><th>#</th><th>Ativo</th><th>Ação</th><th>Score</th><th>Conf.</th><th>Risco</th><th>Regime</th><th>Zona entrada</th><th>Invalidação</th><th>Horizonte</th><th>Ctx risco</th><th>Penalidade</th><th>Motor</th><th></th></tr>'+rows+'</table>';
 }
 
 async function seedDemoWatchlist() {
@@ -193,12 +196,19 @@ async function seedDemoWatchlist() {
 
 async function runScanner() {
   const deepAi = document.getElementById('scannerAi').checked;
+  const useContext = document.getElementById('scannerContext').checked;
   document.getElementById('scannerResults').innerHTML = '<div class="muted">Escaneando...</div>';
   try {
     const result = await json('/api/scanner', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({deep_ai:deepAi, ai_top_n:3, candle_count:140})
+      body:JSON.stringify({
+        deep_ai:deepAi,
+        ai_top_n:3,
+        use_context:useContext,
+        context_top_n:5,
+        candle_count:140
+      })
     });
     document.getElementById('scannerResults').innerHTML = renderScanner(result.ranked);
     if (result.skipped.length) {
