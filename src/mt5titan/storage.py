@@ -14,8 +14,9 @@ class SQLiteStore:
         self._init_schema()
 
     def connect(self):
-        connection = sqlite3.connect(self.path)
+        connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     def _init_schema(self) -> None:
@@ -29,6 +30,7 @@ class SQLiteStore:
 
                 CREATE TABLE IF NOT EXISTS paper_trades (
                     trade_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    analysis_id INTEGER,
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL,
                     stake REAL NOT NULL,
@@ -90,6 +92,28 @@ class SQLiteStore:
                 );
                 """
             )
+            self._migrate_schema(db)
+
+    def _migrate_schema(self, db) -> None:
+        columns = {
+            row["name"]
+            for row in db.execute("PRAGMA table_info(paper_trades)").fetchall()
+        }
+        if "analysis_id" not in columns:
+            db.execute("ALTER TABLE paper_trades ADD COLUMN analysis_id INTEGER")
+
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_paper_trades_analysis_id "
+            "ON paper_trades(analysis_id)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_paper_trades_status "
+            "ON paper_trades(status)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_analyses_created_at "
+            "ON analyses(created_at_utc)"
+        )
 
     def get_state_float(self, key: str, default: float) -> float:
         with self.connect() as db:
@@ -105,6 +129,186 @@ class SQLiteStore:
                 """,
                 (key, str(value)),
             )
+
+    def open_paper_trade_atomic(
+        self,
+        *,
+        analysis_id: int | None,
+        symbol: str,
+        side: str,
+        stake: float,
+        entry_price: float,
+        created_at_utc: str,
+        initial_balance: float,
+    ) -> dict:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = db.execute(
+                "SELECT value FROM app_state WHERE key='paper_balance'"
+            ).fetchone()
+            balance = initial_balance if state is None else float(state["value"])
+            if stake > balance:
+                raise ValueError("insufficient paper balance")
+
+            cursor = db.execute(
+                """
+                INSERT INTO paper_trades(
+                    analysis_id, symbol, side, stake, entry_price, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    analysis_id,
+                    symbol,
+                    side,
+                    float(stake),
+                    float(entry_price),
+                    created_at_utc,
+                ),
+            )
+            new_balance = balance - float(stake)
+            db.execute(
+                """
+                INSERT INTO app_state(key, value) VALUES ('paper_balance', ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (str(round(new_balance, 10)),),
+            )
+            trade_id = int(cursor.lastrowid)
+        return self.get_paper_trade(trade_id)
+
+    def settle_paper_trade_atomic(
+        self,
+        *,
+        trade_id: int,
+        exit_price: float,
+        payout_ratio: float,
+        won: bool,
+        returned: float,
+        pnl: float,
+        settled_at_utc: str,
+        initial_balance: float,
+    ) -> dict:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            trade = db.execute(
+                "SELECT * FROM paper_trades WHERE trade_id=?",
+                (trade_id,),
+            ).fetchone()
+            if trade is None:
+                raise ValueError("trade not found")
+            if trade["status"] != "OPEN":
+                raise ValueError("trade already settled")
+
+            state = db.execute(
+                "SELECT value FROM app_state WHERE key='paper_balance'"
+            ).fetchone()
+            balance = initial_balance if state is None else float(state["value"])
+            new_balance = balance + float(returned)
+
+            db.execute(
+                """
+                UPDATE paper_trades
+                SET status='SETTLED', exit_price=?, payout_ratio=?, won=?, pnl=?,
+                    settled_at_utc=?
+                WHERE trade_id=? AND status='OPEN'
+                """,
+                (
+                    float(exit_price),
+                    float(payout_ratio),
+                    int(won),
+                    float(pnl),
+                    settled_at_utc,
+                    trade_id,
+                ),
+            )
+            db.execute(
+                """
+                INSERT INTO app_state(key, value) VALUES ('paper_balance', ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (str(round(new_balance, 10)),),
+            )
+        return self.get_paper_trade(trade_id)
+
+    def reset_paper_account(self, *, balance: float) -> None:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM paper_trades")
+            db.execute(
+                """
+                INSERT INTO app_state(key, value) VALUES ('paper_balance', ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (str(round(float(balance), 10)),),
+            )
+
+    def paper_risk_snapshot(
+        self,
+        *,
+        initial_balance: float,
+        symbol: str | None = None,
+        day_utc: str | None = None,
+    ) -> dict:
+        from datetime import datetime, timezone
+
+        day = day_utc or datetime.now(timezone.utc).date().isoformat()
+        with self.connect() as db:
+            open_rows = db.execute(
+                "SELECT symbol FROM paper_trades WHERE status='OPEN'"
+            ).fetchall()
+            entries_today = int(
+                db.execute(
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM paper_trades
+                    WHERE substr(created_at_utc, 1, 10)=?
+                    """,
+                    (day,),
+                ).fetchone()["total"]
+            )
+            settled = db.execute(
+                """
+                SELECT pnl, settled_at_utc
+                FROM paper_trades
+                WHERE status='SETTLED' AND pnl IS NOT NULL
+                ORDER BY settled_at_utc, trade_id
+                """
+            ).fetchall()
+
+        daily_pnl = sum(
+            float(row["pnl"])
+            for row in settled
+            if str(row["settled_at_utc"] or "").startswith(day)
+        )
+        cumulative = 0.0
+        peak = 0.0
+        for row in settled:
+            cumulative += float(row["pnl"])
+            peak = max(peak, cumulative)
+
+        drawdown_pct = (
+            (cumulative - peak) / float(initial_balance) * 100.0
+            if initial_balance > 0
+            else 0.0
+        )
+        daily_return_pct = (
+            daily_pnl / float(initial_balance) * 100.0
+            if initial_balance > 0
+            else 0.0
+        )
+        normalized_symbol = symbol.upper() if symbol else None
+        same_symbol_open = (
+            any(str(row["symbol"]).upper() == normalized_symbol for row in open_rows)
+            if normalized_symbol
+            else False
+        )
+        return {
+            "daily_return_pct": round(daily_return_pct, 6),
+            "drawdown_pct": round(drawdown_pct, 6),
+            "entries_today": entries_today,
+            "open_trades": len(open_rows),
+            "conflicting_exposure": same_symbol_open,
+        }
 
     def create_paper_trade(
         self, *, symbol: str, side: str, stake: float, entry_price: float, created_at_utc: str
