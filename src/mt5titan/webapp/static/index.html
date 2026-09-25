@@ -64,6 +64,7 @@
         <div class="card side"><div class="muted">Market Score</div><div id="score" class="metric">—</div></div>
         <div class="card side"><div class="muted">Decisão</div><div id="decision" class="metric">—</div></div>
       </div>
+      <div id="tradeDesk" style="margin-top:18px"></div>
       <h3>Sinais</h3>
       <div id="signals"></div>
       <div id="aiPanel"></div>
@@ -311,6 +312,48 @@ async function evaluateLastDecision() {
   }
 }
 
+function renderTradeDesk(result) {
+  const rec = result.recommendation;
+  if (!rec) return '';
+
+  const directional = rec.action !== 'HOLD';
+  const engine = result.ai && result.ai.enabled
+    ? 'Quant + AI Committee'
+    : result.ai && result.ai.requested && !result.ai.available
+      ? 'Quant · fallback da IA'
+      : 'Quant';
+
+  const invalidation = rec.invalidation_price == null ? '—' : rec.invalidation_price;
+  const entry = directional
+    ? rec.entry_zone_low+' → '+rec.entry_zone_high
+    : 'Sem zona de entrada';
+
+  const reasons = (rec.reasons || []).slice(0,8).map(reason =>
+    '<span class="badge">'+reason+'</span>'
+  ).join(' ');
+
+  return '<div class="card full" style="margin-top:0">'+
+    '<div class="row" style="justify-content:space-between">'+
+      '<div><div class="muted">Trade Desk</div><div class="metric">'+rec.action+'</div></div>'+
+      '<div class="badge">Score '+rec.opportunity_score+'/100</div>'+
+      '<div class="badge">Risco '+rec.risk_level+'</div>'+
+      '<div class="badge">'+engine+'</div>'+
+    '</div>'+
+    '<table style="margin-top:12px"><tr>'+
+      '<th>Zona indicativa</th><th>Invalidação</th><th>Horizonte</th><th>Confiança</th><th>Contexto</th><th>MTF</th>'+
+    '</tr><tr>'+
+      '<td>'+entry+'</td>'+
+      '<td>'+invalidation+'</td>'+
+      '<td>'+rec.horizon+'</td>'+
+      '<td>'+Math.round(result.decision.confidence*100)+'%</td>'+
+      '<td>'+rec.context_risk+(rec.context_penalty_pct ? ' (-'+rec.context_penalty_pct+'%)' : '')+'</td>'+
+      '<td>'+rec.timeframe_status+(rec.timeframe_adjustment_pct ? ' ('+(rec.timeframe_adjustment_pct > 0 ? '+' : '')+rec.timeframe_adjustment_pct+'%)' : '')+'</td>'+
+    '</tr></table>'+
+    '<div class="row" style="margin-top:12px">'+reasons+'</div>'+
+    '<div class="muted" style="margin-top:10px">Análise probabilística; capital e execução continuam sob seu controle.</div>'+
+  '</div>';
+}
+
 function renderExternalContext(context) {
   if (!context || !context.requested) {
     return '<div class="muted" style="margin-top:12px">Contexto News/Macro não solicitado.</div>';
@@ -445,6 +488,7 @@ async function runMarketAnalysis() {
     document.getElementById('decision').textContent = result.decision.action;
     lastAnalysisId = result.analysis_id;
     lastDecision = result.decision.action;
+    document.getElementById('tradeDesk').innerHTML = renderTradeDesk(result);
     document.getElementById('signals').innerHTML = '<table><tr><th>Fonte</th><th>Ação</th><th>Confiança</th></tr>' +
       result.signals.map(s => '<tr><td>'+s.source+'</td><td>'+s.action+'</td><td>'+Math.round(s.confidence*100)+'%</td></tr>').join('') + '</table>';
     document.getElementById('aiPanel').innerHTML = renderAi(result.ai);
@@ -459,6 +503,7 @@ async function runMarketAnalysis() {
     document.getElementById('regime').textContent = 'ERRO';
     document.getElementById('score').textContent = '—';
     document.getElementById('decision').textContent = '—';
+    document.getElementById('tradeDesk').innerHTML = '';
     document.getElementById('signals').innerHTML = '';
     document.getElementById('aiPanel').innerHTML = '';
     document.getElementById('contextPanel').innerHTML = '';
