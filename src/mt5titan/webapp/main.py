@@ -13,9 +13,9 @@ from pydantic import BaseModel, Field
 from mt5titan.brokers import AvalonBrokerAdapter, PaperTradingBroker
 from mt5titan.contextdata import FredMacroProvider, GdeltNewsProvider
 from mt5titan.domain import Decision, DecisionAction, MarketRegime, MarketSnapshot
-from mt5titan.intelligence import DecisionEngine, build_features, build_trade_recommendation, detect_regime, score_market
+from mt5titan.intelligence import DecisionEngine, build_features, build_timeframe_confirmation, build_trade_recommendation, detect_regime, score_market
 from mt5titan.intelligence.signals import strategy_signal
-from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider, TwelveDataMarketDataProvider
+from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider, TwelveDataMarketDataProvider, next_higher_timeframe, resample_candles
 from mt5titan.research import StrategySpec
 from mt5titan.risk import RiskEngine, RiskLimits, RiskState
 from mt5titan.storage import SQLiteStore
@@ -23,7 +23,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.12.0")
+app = FastAPI(title="MT5TITAN", version="0.13.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -90,7 +90,9 @@ class ScannerRequest(BaseModel):
     ai_top_n: int = Field(default=3, ge=1, le=5)
     use_context: bool = True
     context_top_n: int = Field(default=5, ge=1, le=10)
-    candle_count: int = Field(default=140, ge=30, le=500)
+    use_mtf: bool = True
+    mtf_top_n: int = Field(default=2, ge=1, le=5)
+    candle_count: int = Field(default=180, ge=30, le=500)
 
 
 def _env_float(name: str, default: float) -> float:
@@ -370,7 +372,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.12.0",
+        "version": "0.13.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -511,6 +513,7 @@ def scan_opportunities(payload: ScannerRequest):
                 "market_score": report["market_score"],
                 "risk": report["risk"],
                 "_candles": batch.candles,
+                "_report": report,
             })
         except (ValueError, RuntimeError) as error:
             skipped.append({
@@ -536,6 +539,10 @@ def scan_opportunities(payload: ScannerRequest):
                 candles=[Candle(**row) for row in candidate["_candles"]],
             )
             report = _analyze(request)
+            if candidate.get("timeframe_confirmation", {}).get("status") in {
+                "ALIGNED", "CONFLICT", "NEUTRAL"
+            }:
+                report["timeframe_confirmation"] = candidate["timeframe_confirmation"]
             recommendation = build_trade_recommendation(report)
             candidate.update({
                 "context_enriched": True,
@@ -545,6 +552,58 @@ def scan_opportunities(payload: ScannerRequest):
                 "market_score": report["market_score"],
                 "risk": report["risk"],
                 "external_context": report["external_context"],
+                "_report": report,
+            })
+
+        candidates.sort(
+            key=lambda row: row["recommendation"]["opportunity_score"],
+            reverse=True,
+        )
+
+    if payload.use_mtf:
+        for candidate in candidates[: payload.mtf_top_n]:
+            higher_timeframe = next_higher_timeframe(candidate["timeframe"])
+            if not higher_timeframe:
+                candidate["timeframe_confirmation"] = {
+                    "status": "NOT_AVAILABLE",
+                    "base_timeframe": candidate["timeframe"],
+                }
+                continue
+
+            higher_candles = resample_candles(
+                candidate["_candles"],
+                higher_timeframe,
+            )
+            if len(higher_candles) < 30:
+                candidate["timeframe_confirmation"] = {
+                    "status": "INSUFFICIENT_DATA",
+                    "base_timeframe": candidate["timeframe"],
+                    "higher_timeframe": higher_timeframe,
+                    "bars": len(higher_candles),
+                }
+                continue
+
+            higher_request = AnalyzeRequest(
+                symbol=candidate["symbol"],
+                timeframe=higher_timeframe,
+                source=candidate["source"],
+                use_ai=False,
+                use_external_context=False,
+                candles=[Candle(**row) for row in higher_candles],
+            )
+            higher_report = _analyze(higher_request)
+            base_report = candidate["_report"]
+            confirmation = build_timeframe_confirmation(
+                base_report=base_report,
+                higher_report=higher_report,
+            )
+            confirmation_payload = confirmation.to_dict()
+            base_report["timeframe_confirmation"] = confirmation_payload
+            candidate.update({
+                "mtf_enriched": True,
+                "timeframe_confirmation": confirmation_payload,
+                "recommendation": build_trade_recommendation(base_report).to_dict(),
+                "_report": base_report,
             })
 
         candidates.sort(
@@ -580,6 +639,7 @@ def scan_opportunities(payload: ScannerRequest):
                 "ai": report["ai"],
                 "external_context": report["external_context"],
                 "context_enriched": payload.use_context,
+                "_report": report,
             })
 
         candidates.sort(
@@ -589,6 +649,7 @@ def scan_opportunities(payload: ScannerRequest):
 
     for candidate in candidates:
         candidate.pop("_candles", None)
+        candidate.pop("_report", None)
 
     return {
         "mode": (
@@ -601,6 +662,7 @@ def scan_opportunities(payload: ScannerRequest):
             else "QUANT_SCAN"
         ),
         "watchlist_size": len(watch_items),
+        "mtf_enabled": payload.use_mtf,
         "ranked": candidates,
         "skipped": skipped,
         "note": (
