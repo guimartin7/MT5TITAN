@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from mt5titan.brokers import AvalonBrokerAdapter, PaperTradingBroker
 from mt5titan.contextdata import FredMacroProvider, GdeltNewsProvider
-from mt5titan.domain import DecisionAction
+from mt5titan.domain import Decision, DecisionAction, MarketRegime, MarketSnapshot
 from mt5titan.intelligence import DecisionEngine, build_features, build_trade_recommendation, detect_regime, score_market
 from mt5titan.intelligence.signals import strategy_signal
 from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider, TwelveDataMarketDataProvider
@@ -23,7 +23,7 @@ from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, bui
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.11.0")
+app = FastAPI(title="MT5TITAN", version="0.12.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -91,6 +91,85 @@ class ScannerRequest(BaseModel):
     use_context: bool = True
     context_top_n: int = Field(default=5, ge=1, le=10)
     candle_count: int = Field(default=140, ge=30, le=500)
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _execution_risk_limits() -> RiskLimits:
+    return RiskLimits(
+        max_daily_loss_pct=_env_float("MT5TITAN_MAX_DAILY_LOSS_PCT", 1.0),
+        max_drawdown_pct=_env_float("MT5TITAN_MAX_DRAWDOWN_PCT", 2.0),
+        max_entries_per_day=_env_int("MT5TITAN_MAX_ENTRIES_PER_DAY", 5),
+        max_open_trades=_env_int("MT5TITAN_MAX_OPEN_TRADES", 3),
+        max_stake_pct=_env_float("MT5TITAN_MAX_STAKE_PCT", 10.0),
+        min_confidence=_env_float("MT5TITAN_MIN_CONFIDENCE", 0.55),
+    )
+
+
+def _execution_risk_recheck(analysis: dict, order: "PaperOrderRequest"):
+    report = analysis["payload"]
+    regime_value = (report.get("regime") or {}).get("value") or analysis["regime"]
+    try:
+        regime = MarketRegime(str(regime_value))
+    except ValueError:
+        regime = MarketRegime.UNCERTAIN
+
+    decision = Decision(
+        decision_id=analysis["decision_id"],
+        symbol=analysis["symbol"],
+        action=DecisionAction(analysis["action"]),
+        confidence=float(analysis["confidence"]),
+        score=float(analysis["score"]),
+        contributors={},
+        reason_codes=("EXECUTION_RECHECK",),
+    )
+    timestamp = int(report.get("market_timestamp") or 1)
+    snapshot = MarketSnapshot(
+        symbol=analysis["symbol"],
+        timeframe=analysis["timeframe"],
+        timestamp=max(timestamp, 1),
+        bid=float(order.price),
+        ask=float(order.price),
+        regime=regime,
+        features=dict(report.get("features") or {}),
+    )
+
+    persisted = store.paper_risk_snapshot(
+        initial_balance=paper.initial_balance,
+        symbol=analysis["symbol"],
+    )
+    current_balance = paper.balance
+    stake_pct = (
+        float(order.stake) / current_balance * 100.0
+        if current_balance > 0
+        else 100.0
+    )
+    state = RiskState(
+        daily_return_pct=float(persisted["daily_return_pct"]),
+        drawdown_pct=float(persisted["drawdown_pct"]),
+        entries_today=int(persisted["entries_today"]),
+        open_trades=int(persisted["open_trades"]),
+        stake_pct_of_balance=stake_pct,
+        conflicting_exposure=bool(persisted["conflicting_exposure"]),
+    )
+    decision_result = RiskEngine(_execution_risk_limits()).evaluate(
+        decision,
+        snapshot,
+        state,
+    )
+    return decision_result, state
 
 
 def _specs():
@@ -291,7 +370,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.11.0",
+        "version": "0.12.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -592,6 +671,26 @@ def outcome_stats():
     return store.outcome_statistics()
 
 
+@app.get("/api/risk/status")
+def risk_status(symbol: str | None = None):
+    limits = _execution_risk_limits()
+    state = store.paper_risk_snapshot(
+        initial_balance=paper.initial_balance,
+        symbol=symbol,
+    )
+    return {
+        "limits": {
+            "max_daily_loss_pct": limits.max_daily_loss_pct,
+            "max_drawdown_pct": limits.max_drawdown_pct,
+            "max_entries_per_day": limits.max_entries_per_day,
+            "max_open_trades": limits.max_open_trades,
+            "max_stake_pct": limits.max_stake_pct,
+            "min_confidence": limits.min_confidence,
+        },
+        "state": state,
+    }
+
+
 @app.get("/api/paper")
 def paper_status():
     return paper.snapshot()
@@ -612,11 +711,28 @@ def paper_order(payload: PaperOrderRequest):
             raise ValueError("HOLD analysis cannot open a trade")
         if analysis["action"] != payload.side:
             raise ValueError("paper side must match persisted analysis decision")
-        if analysis["symbol"] != payload.symbol:
+        if analysis["symbol"].upper() != payload.symbol.upper():
             raise ValueError("paper symbol must match persisted analysis")
+
+        risk_recheck, risk_state = _execution_risk_recheck(analysis, payload)
+        if not risk_recheck.allowed:
+            reasons = ", ".join(risk_recheck.reasons)
+            raise ValueError(f"execution risk blocked: {reasons}")
+
         order = payload.model_dump(exclude={"analysis_id"})
-        trade = paper.place_order(**order)
-        trade["analysis_id"] = payload.analysis_id
+        trade = paper.place_order(
+            **order,
+            analysis_id=payload.analysis_id,
+        )
+        trade["risk_recheck"] = {
+            "allowed": True,
+            "reasons": list(risk_recheck.reasons),
+            "daily_return_pct": risk_state.daily_return_pct,
+            "drawdown_pct": risk_state.drawdown_pct,
+            "entries_today": risk_state.entries_today,
+            "open_trades_before": risk_state.open_trades,
+            "stake_pct_of_balance": round(risk_state.stake_pct_of_balance, 4),
+        }
         return trade
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

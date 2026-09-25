@@ -78,7 +78,9 @@
         <button onclick="paperOrder('BUY')">BUY</button>
         <button onclick="paperOrder('SELL')">SELL</button>
       </div>
-      <div id="paperMsg" class="muted" style="margin-top:12px"></div><div style="margin-top:12px"><button onclick="resetPaper()">Reset paper</button></div>
+      <div id="paperMsg" class="muted" style="margin-top:12px"></div>
+      <div id="riskPanel" style="margin-top:14px"></div>
+      <div style="margin-top:12px"><button onclick="resetPaper()">Reset paper</button></div>
     </aside>
 
     <section class="card full">
@@ -145,12 +147,14 @@ async function refresh() {
   const health = await json('/api/health');
   const brokers = await json('/api/brokers');
   const paper = await json('/api/paper');
+  const risk = await json('/api/risk/status?symbol='+encodeURIComponent(document.getElementById('symbol').value || ''));
   document.getElementById('balance').textContent = '$ ' + paper.balance.toFixed(2);
   document.getElementById('brokerBadge').textContent =
     'Paper: ON · Avalon: ' + (brokers.avalon.connected ? 'ON' : 'aguardando API oficial') +
     ' · IA: ' + (health.ai.configured ? 'configurada' : 'OFF') +
     ' · Market: ' + (health.market_data.twelve_configured ? 'REAL ON' : 'demo/importado');
   document.getElementById('paperTrades').innerHTML = renderPaper(paper);
+  document.getElementById('riskPanel').innerHTML = renderRisk(risk);
   const history = await json('/api/analyses?limit=12');
   document.getElementById('analysisHistory').innerHTML = renderHistory(history.items);
   const watch = await json('/api/watchlist');
@@ -228,12 +232,24 @@ async function openOpportunity(symbol, timeframe, source, useAi) {
   window.scrollTo({top:document.getElementById('regime').getBoundingClientRect().top + window.scrollY - 100, behavior:'smooth'});
 }
 
+function renderRisk(risk) {
+  const s = risk.state;
+  const l = risk.limits;
+  return '<div class="muted">Risk Engine</div>'+
+    '<div class="row" style="margin-top:8px">'+
+    '<div class="badge">Dia '+s.daily_return_pct.toFixed(2)+'%</div>'+
+    '<div class="badge">DD '+s.drawdown_pct.toFixed(2)+'%</div>'+
+    '<div class="badge">Entradas '+s.entries_today+'/'+l.max_entries_per_day+'</div>'+
+    '<div class="badge">Abertas '+s.open_trades+'/'+l.max_open_trades+'</div>'+
+    '</div><div class="muted" style="margin-top:8px">Stake máx.: '+l.max_stake_pct+'% do saldo · Conf. mín.: '+Math.round(l.min_confidence*100)+'%</div>';
+}
+
 function renderPaper(paper) {
   const open = paper.open_trades || [];
   const history = paper.history || [];
-  const openRows = open.map(t => '<tr><td>#'+t.trade_id+'</td><td>'+t.symbol+'</td><td>'+t.side+'</td><td>'+t.entry_price+'</td><td><button onclick="settleTrade('+t.trade_id+')">Liquidar</button></td></tr>').join('');
+  const openRows = open.map(t => '<tr><td>#'+t.trade_id+'</td><td>#'+(t.analysis_id ?? '—')+'</td><td>'+t.symbol+'</td><td>'+t.side+'</td><td>'+t.entry_price+'</td><td><button onclick="settleTrade('+t.trade_id+')">Liquidar</button></td></tr>').join('');
   const historyRows = history.slice(0,8).map(t => '<tr><td>#'+t.trade_id+'</td><td>'+t.side+'</td><td>'+t.pnl+'</td><td>'+(t.won ? 'WIN' : 'LOSS')+'</td><td>'+t.status+'</td></tr>').join('');
-  return '<h3>Abertas</h3><table><tr><th>ID</th><th>Ativo</th><th>Lado</th><th>Entrada</th><th></th></tr>'+(openRows || '<tr><td colspan="5">Nenhuma operação aberta.</td></tr>')+'</table><h3>Fechadas</h3><table><tr><th>ID</th><th>Lado</th><th>P&L</th><th>Resultado</th><th>Status</th></tr>'+(historyRows || '<tr><td colspan="5">Sem histórico.</td></tr>')+'</table>';
+  return '<h3>Abertas</h3><table><tr><th>Trade</th><th>Análise</th><th>Ativo</th><th>Lado</th><th>Entrada</th><th></th></tr>'+(openRows || '<tr><td colspan="6">Nenhuma operação aberta.</td></tr>')+'</table><h3>Fechadas</h3><table><tr><th>ID</th><th>Lado</th><th>P&L</th><th>Resultado</th><th>Status</th></tr>'+(historyRows || '<tr><td colspan="5">Sem histórico.</td></tr>')+'</table>';
 }
 
 function renderHistory(items) {

@@ -269,3 +269,49 @@ Penalidades atuais:
 
 O dashboard mostra a penalidade aplicada e o nível de risco contextual para que o
 ranking permaneça auditável.
+
+
+## Risk Engine persistente e auditoria de trades
+
+A versão 0.12.0 reavalia o risco imediatamente antes de cada operação paper.
+
+O recheck usa o estado real persistido:
+
+- P&L realizado do dia;
+- drawdown realizado;
+- número de entradas no dia;
+- quantidade de operações abertas;
+- exposição já aberta no mesmo ativo;
+- stake como percentual do saldo disponível;
+- confiança da decisão original.
+
+Limites padrão:
+
+```text
+Perda diária:       1%
+Drawdown:           2%
+Entradas/dia:       5
+Operações abertas:  3
+Stake máxima:       10% do saldo
+Confiança mínima:   55%
+```
+
+Eles podem ser alterados por variáveis de ambiente:
+
+```powershell
+$env:MT5TITAN_MAX_DAILY_LOSS_PCT="1.0"
+$env:MT5TITAN_MAX_DRAWDOWN_PCT="2.0"
+$env:MT5TITAN_MAX_ENTRIES_PER_DAY="5"
+$env:MT5TITAN_MAX_OPEN_TRADES="3"
+$env:MT5TITAN_MAX_STAKE_PCT="10.0"
+$env:MT5TITAN_MIN_CONFIDENCE="0.55"
+```
+
+Cada paper trade persiste seu `analysis_id`, criando a trilha:
+
+```text
+análise → decisão → recheck de risco → trade → settlement
+```
+
+Saldo e lifecycle do trade são atualizados em transação SQLite única. O botão
+**Reset paper** agora restaura a conta e limpa operações paper antigas.
