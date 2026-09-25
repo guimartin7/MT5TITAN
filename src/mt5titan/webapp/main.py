@@ -19,11 +19,11 @@ from mt5titan.marketdata import DemoMarketDataProvider, StoredMarketDataProvider
 from mt5titan.research import StrategySpec
 from mt5titan.risk import RiskEngine, RiskLimits, RiskState
 from mt5titan.storage import SQLiteStore
-from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, build_agent_context
+from mt5titan.titan import AICommittee, OpinionReplayStore, TitanExperiment, build_agent_context, build_calibration_advice
 from mt5titan.titan.providers import OpenAIProvider
 
 
-app = FastAPI(title="MT5TITAN", version="0.14.0")
+app = FastAPI(title="MT5TITAN", version="0.15.0")
 store = SQLiteStore()
 paper = PaperTradingBroker(store=store)
 avalon = AvalonBrokerAdapter()
@@ -374,7 +374,7 @@ def health():
     ai_configured = bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
     return {
         "status": "ok",
-        "version": "0.14.0",
+        "version": "0.15.0",
         "persistence": "sqlite",
         "ai": {
             "provider": "openai",
@@ -737,6 +737,11 @@ def outcomes(limit: int = 100):
 @app.get("/api/outcomes/stats")
 def outcome_stats():
     return store.outcome_statistics()
+
+
+@app.get("/api/calibration")
+def calibration():
+    return build_calibration_advice(store.agent_calibration_samples())
 
 
 @app.get("/api/risk/status")
